@@ -5,8 +5,10 @@ from AppKit import NSApplicationActivateIgnoringOtherApps, NSRunningApplication
 
 from manga_dialogue.capture.base import CaptureDriver, WindowRect
 
-KINDLE_BUNDLE_ID = "com.amazon.Kindle"
+KINDLE_BUNDLE_ID = "com.amazon.Lassen"
 KINDLE_OWNER_NAME = "Kindle"
+
+MIN_WINDOW_SIZE = 300
 
 KEY_CODES = {
     "space": 49,
@@ -29,7 +31,10 @@ class MacKindleDriver(CaptureDriver):
         candidates = [
             w
             for w in windows
-            if w.get("kCGWindowOwnerName") == KINDLE_OWNER_NAME and w.get("kCGWindowLayer", 0) == 0
+            if w.get("kCGWindowOwnerName") == KINDLE_OWNER_NAME
+            and w.get("kCGWindowLayer", 0) == 0
+            and w["kCGWindowBounds"]["Width"] >= MIN_WINDOW_SIZE
+            and w["kCGWindowBounds"]["Height"] >= MIN_WINDOW_SIZE
         ]
         if not candidates:
             return None
@@ -42,6 +47,7 @@ class MacKindleDriver(CaptureDriver):
         if not apps:
             raise RuntimeError("Kindle が起動していません")
         apps[0].activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
+        Quartz.CGWarpMouseCursorPosition((0, 0))
         time.sleep(0.5)
 
     def send_key(self, key: str) -> None:

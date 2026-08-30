@@ -79,6 +79,13 @@ export ANTHROPIC_API_KEY="sk-ant-api03-..."
 
 許可後はターミナルを再起動してください。
 
+**tmux を使っている場合の注意**: tmux サーバーはターミナルから切り離されて動くため、
+macOS は権限の主体を iTerm 等ではなく `tmux` 自身として扱います。iTerm に許可を与えても
+tmux 内からは効きません。**tmux を使わない素のターミナルタブで実行**するのが最も簡単です。
+どうしても tmux 内で動かしたい場合は、アクセシビリティの「+」ダイアログで ⌘⇧G を押し、
+`realpath $(which tmux)` で得られる実体パス（例: `/opt/homebrew/Cellar/tmux/3.4_1/bin/tmux`）を
+入力して追加してください（tmux 更新のたびに再登録が必要です）。
+
 ## 使い方
 
 作業データはすべて `works/<作品名>/` 配下に作品ごとに保存されます。
@@ -192,6 +199,8 @@ https://www.anthropic.com/pricing を参照してください。まず `--max-pa
 | ページが送られない | 「アクセシビリティ」の許可がない、または `--key left` を試す |
 | 同じページが 2 枚続けて保存される | `--delay` を増やす（描画が間に合っていない） |
 | 1 枚目で即終了する | Kindle が前面化に失敗している。手動で前面にしてから再実行 |
+| 画像が壁紙や別ウィンドウになる | ステージマネージャーで Kindle が非アクティブ。一度 Kindle をクリックしてから再実行 |
+| tmux 内でページ送りが効かない | 上記「tmux を使っている場合の注意」を参照 |
 | `authentication_error` | `ANTHROPIC_API_KEY` が未設定または誤り。`echo $ANTHROPIC_API_KEY` で確認 |
 | `rate_limit_error` | しばらく待って `--resume` で再開 |
 

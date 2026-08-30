@@ -59,13 +59,12 @@ class CaptureDriver(ABC):
 
         ページ送り後に画像が変化しなかった時点で最終ページとみなして終了する。
         """
-        rect = self.find_window()
-        if rect is None:
-            raise RuntimeError("Kindle のウィンドウが見つかりません。Kindle で本を開いてください")
-
         work.ensure_dirs()
         self.activate()
         time.sleep(delay)
+        rect = self.find_window()
+        if rect is None:
+            raise RuntimeError("Kindle のウィンドウが見つかりません。Kindle で本を開いてください")
 
         prev: Image.Image | None = None
         saved = 0
