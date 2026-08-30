@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -16,6 +18,10 @@ class Line(BaseModel):
     speaker: str = Field(description="話者名。ナレーションは「ナレーション」、不明は「不明」")
     text: str
     confidence: float = Field(ge=0.0, le=1.0, description="話者特定の確信度")
+    basis: Literal["tail", "context", "unknown"] | None = Field(
+        default=None,
+        description="話者を決めた根拠。tail=吹き出しの尻尾が指す人物、context=尻尾では決まらず文脈から推定、unknown=不明",
+    )
     x: float | None = Field(default=None, ge=0.0, le=1.0, description="吹き出し中心の横位置。画像左端 0.0〜右端 1.0")
     y: float | None = Field(default=None, ge=0.0, le=1.0, description="吹き出し中心の縦位置。画像上端 0.0〜下端 1.0")
 
@@ -75,6 +81,18 @@ def _split(panels: list[Panel], axis: str) -> list[list[Panel]]:
 COLUMN_BAND = 0.15
 
 
+CONTEXT_CONFIDENCE_CAP = 0.6
+
+
+def cap_context_confidence(lines: list["Line"]) -> list["Line"]:
+    """尻尾ではなく文脈から推定した話者の confidence を上限で抑える"""
+    return [
+        l.model_copy(update={"confidence": min(l.confidence, CONTEXT_CONFIDENCE_CAP)})
+        if l.basis == "context" else l
+        for l in lines
+    ]
+
+
 def sort_reading_order(lines: list["Line"], panels: list[Panel] | None = None) -> list["Line"]:
     """コマを読み順に並べ、同じコマ内は座標から 右→左、上→下 の読み順に並べ替える。
 
@@ -96,11 +114,29 @@ def sort_reading_order(lines: list["Line"], panels: list[Panel] | None = None) -
         remaining = sorted(group, key=lambda l: -l.x)
         while remaining:
             anchor = remaining[0]
-            column = [l for l in remaining if anchor.x - l.x <= COLUMN_BAND]
+            column = [l for l in remaining if _same_column(anchor, l)]
             column.sort(key=lambda l: l.y)
             result.extend(column)
             remaining = [l for l in remaining if l not in column]
     return result
+
+
+def _same_column(anchor: "Line", other: "Line") -> bool:
+    """anchor（より右にある吹き出し）と other が縦に積まれた関係かどうか。
+
+    横のずれが小さく、かつ横のずれより縦のずれが大きければ同じ列とみなす。
+    横に並んだ吹き出し（縦のずれが小さい）は別の列として右が先になる。
+    """
+    if other is anchor:
+        return True
+    dx = anchor.x - other.x
+    dy = abs(other.y - anchor.y)
+    return dx <= COLUMN_BAND and dy >= dx
+
+
+def normalize_text(lines: list["Line"]) -> list["Line"]:
+    """吹き出し内の改行を詰めて 1 行にする"""
+    return [l.model_copy(update={"text": " ".join(l.text.split())}) for l in lines]
 
 
 class PageExtraction(BaseModel):

@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from manga_dialogue.extract.characters import CharacterBook
 from manga_dialogue.extract.prompt import SYSTEM_PROMPT, build_user_prompt
-from manga_dialogue.models import PageExtraction, sort_reading_order
+from manga_dialogue.models import PageExtraction, cap_context_confidence, normalize_text, sort_reading_order
 
 DEFAULT_MODEL = "claude-opus-5"
 MAX_ATTEMPTS = 3
@@ -76,5 +76,5 @@ def _request(
     if response.parsed_output is None:
         raise ValueError(f"{image_path.name}: 構造化出力を取得できませんでした (stop_reason={response.stop_reason})")
     extraction = response.parsed_output
-    extraction.lines = sort_reading_order(extraction.lines, extraction.panels)
+    extraction.lines = normalize_text(cap_context_confidence(sort_reading_order(extraction.lines, extraction.panels)))
     return extraction
