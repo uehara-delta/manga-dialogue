@@ -5,7 +5,8 @@ import anthropic
 import typer
 
 from manga_dialogue.extract.characters import CharacterBook
-from manga_dialogue.extract.extractor import DEFAULT_MODEL, extract_page
+from manga_dialogue.extract.consolidate import propose_consolidation
+from manga_dialogue.extract.extractor import DEFAULT_MODEL, ExtractionFailed, extract_page
 from manga_dialogue.extract.renames import apply_rename, record_pending
 from manga_dialogue.models import PageResult
 from manga_dialogue.workspace import DEFAULT_ROOT, Work
@@ -20,12 +21,13 @@ def capture(
     delay: float = typer.Option(1.0, help="ページ送り後の待機秒数"),
     key: str = typer.Option("space", help="ページ送りキー: space / left / right"),
     start: int = typer.Option(1, help="開始ページ番号（ファイル名に使用）"),
+    volume: int = typer.Option(1, help="巻番号"),
     root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
 ) -> None:
     """Kindle を前面化し、ページ送りしながらスクリーンショットを保存する"""
     from manga_dialogue.capture.base import get_driver
 
-    work = Work(title, root)
+    work = Work(title, root, volume)
     driver = get_driver()
     typer.echo(f"キャプチャ開始: {work.captures_dir}")
     saved = driver.run(
@@ -59,6 +61,7 @@ def _process_page(
     added = book.merge(extraction.new_characters)
     book.save()
     result = PageResult(
+        volume=work.volume,
         page=page,
         image=image.name,
         lines=extraction.lines,
@@ -85,16 +88,25 @@ def _process_page(
     return result
 
 
+def _report_failures(failed: list[str]) -> None:
+    if not failed:
+        return
+    typer.echo(f"失敗したページ ({len(failed)}): {', '.join(failed)}", err=True)
+    typer.echo("--resume を付けて再実行すると失敗ページだけ再処理されます", err=True)
+    raise typer.Exit(1)
+
+
 @app.command()
 def extract(
     title: str = typer.Argument(help="作品名（works/<title>/captures を処理）"),
     model: str = typer.Option(DEFAULT_MODEL, help="使用するモデル ID"),
     resume: bool = typer.Option(False, help="出力済みページをスキップして再開"),
     rename_threshold: float = typer.Option(0.8, help="この confidence 以上の改名指示を自動適用"),
+    volume: int = typer.Option(1, help="巻番号"),
     root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
 ) -> None:
     """キャプチャ画像を順に LLM へ送り、ページごとに JSON を出力する"""
-    work = Work(title, root)
+    work = Work(title, root, volume)
     images = work.capture_images()
     if not images:
         typer.echo(f"画像がありません: {work.captures_dir}", err=True)
@@ -104,22 +116,30 @@ def extract(
     book = CharacterBook.load(work.characters_path)
     client = anthropic.Anthropic()
 
+    failed: list[str] = []
     for image in images:
         if resume and work.output_path(int(image.stem)).exists():
             continue
-        _process_page(client, work, image, book, model, rename_threshold)
+        try:
+            _process_page(client, work, image, book, model, rename_threshold)
+        except ExtractionFailed as e:
+            typer.echo(f"失敗（スキップ）: {e}", err=True)
+            failed.append(image.name)
 
     typer.echo(f"完了: {work.output_dir} / 台帳 {len(book.characters)} 名")
+    _report_failures(failed)
 
 
 @app.command()
 def repass(
     title: str = typer.Argument(help="作品名"),
     model: str = typer.Option(DEFAULT_MODEL, help="使用するモデル ID"),
-    min_confidence: float = typer.Option(0.7, help="この値未満の confidence を含むページを再抽出"),
+    min_confidence: float = typer.Option(0.5, help="この値未満の confidence を含むページを再抽出"),
     all_pages: bool = typer.Option(False, "--all", help="条件に関係なく全ページを再抽出"),
+    pages: list[int] = typer.Option([], "--page", help="指定ページだけ再抽出（複数指定可）"),
     dry_run: bool = typer.Option(False, help="対象ページの一覧だけ表示して終了"),
     rename_threshold: float = typer.Option(0.8, help="この confidence 以上の改名指示を自動適用"),
+    volume: int | None = typer.Option(None, help="巻番号（省略時は全巻）"),
     root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
 ) -> None:
     """処理済み範囲の台帳を使い、「不明」や低 confidence を含むページだけ再抽出する
@@ -132,26 +152,78 @@ def repass(
         typer.echo(f"台帳が空です。先に extract を実行してください: {work.characters_path}", err=True)
         raise typer.Exit(1)
 
-    targets: list[Path] = []
-    for image in work.capture_images():
-        out = work.output_path(int(image.stem))
-        if not out.exists():
-            continue
-        result = PageResult.model_validate_json(out.read_text(encoding="utf-8"))
-        if all_pages or result.needs_repass(min_confidence):
-            targets.append(image)
+    volumes = [Work(title, root, volume)] if volume is not None else work.all_volumes()
+    targets: list[tuple[Work, Path]] = []
+    for vol in volumes:
+        for image in vol.capture_images():
+            out = vol.output_path(int(image.stem))
+            if not out.exists():
+                continue
+            page = int(image.stem)
+            if pages:
+                if page in pages:
+                    targets.append((vol, image))
+                continue
+            result = PageResult.model_validate_json(out.read_text(encoding="utf-8"))
+            if all_pages or result.needs_repass(min_confidence):
+                targets.append((vol, image))
 
     typer.echo(f"再抽出対象: {len(targets)} ページ（台帳 {len(book.characters)} 名）")
     if dry_run or not targets:
-        for t in targets:
-            typer.echo(f"  {t.name}")
+        for vol, t in targets:
+            typer.echo(f"  v{vol.volume:02d} {t.name}")
         return
 
     client = anthropic.Anthropic()
-    for image in targets:
-        _process_page(client, work, image, book, model, rename_threshold, final_book=True)
+    failed: list[str] = []
+    for vol, image in targets:
+        try:
+            _process_page(client, vol, image, book, model, rename_threshold, final_book=True)
+        except ExtractionFailed as e:
+            typer.echo(f"失敗（スキップ）: {e}", err=True)
+            failed.append(f"v{vol.volume:02d}/{image.name}")
 
-    typer.echo(f"完了: {len(targets)} ページ再抽出")
+    typer.echo(f"完了: {len(targets) - len(failed)} ページ再抽出")
+    _report_failures(failed)
+
+
+@app.command()
+def consolidate(
+    title: str = typer.Argument(help="作品名"),
+    model: str = typer.Option(DEFAULT_MODEL, help="使用するモデル ID"),
+    rename_threshold: float = typer.Option(0.8, help="この confidence 以上の提案を自動適用"),
+    dry_run: bool = typer.Option(False, help="提案を表示するだけで適用しない"),
+    root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
+) -> None:
+    """全セリフを通読させて仮名の解決・重複統合を提案させ、台帳と出力に適用する
+
+    画像は送らずテキストのみで 1 回だけ API を呼ぶ。extract / repass の実行中には使わない。
+    """
+    work = Work(title, root)
+    book = CharacterBook.load(work.characters_path)
+    if not book.characters or not any(v.output_files() for v in work.all_volumes()):
+        typer.echo("台帳または出力がありません。先に extract を実行してください", err=True)
+        raise typer.Exit(1)
+
+    client = anthropic.Anthropic()
+    plan = propose_consolidation(client, book, work, model)
+    typer.echo(f"提案: {len(plan.renames)} 件")
+    applied = 0
+    for r in plan.renames:
+        mark = "適用" if r.confidence >= rename_threshold else "保留"
+        if dry_run:
+            mark = "候補"
+        typer.echo(f"  [{mark} {r.confidence:.2f}] {r.from_name} → {r.to_name}\n      {r.reason}")
+        if dry_run or book.find(r.from_name) is None:
+            continue
+        if r.confidence >= rename_threshold:
+            n = apply_rename(work, book, r.from_name, r.to_name)
+            typer.echo(f"      → {n} 件置換")
+            applied += 1
+        else:
+            record_pending(work, 0, r)
+    if not dry_run:
+        typer.echo(f"完了: {applied} 件適用 / 台帳 {len(book.characters)} 名")
 
 
 @app.command()

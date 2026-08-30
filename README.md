@@ -89,13 +89,22 @@ tmux 内からは効きません。**tmux を使わない素のターミナル�
 ## 使い方
 
 作業データはすべて `works/<作品名>/` 配下に作品ごとに保存されます。
+キャラ台帳は作品単位で共有し、キャプチャと抽出結果は巻ごとに分かれます。
 
 ```
 works/<作品名>/
-├── characters.json   # キャラ台帳（extract が自動生成・更新）
-├── captures/         # 0001.png, 0002.png, ...
-└── output/           # 0001.json, 0002.json, ...
+├── characters.json          # キャラ台帳（作品全体で共有。extract が自動生成・更新）
+├── pending_renames.jsonl    # 保留中の改名候補
+└── volumes/
+    ├── 01/
+    │   ├── captures/        # 0001.png, 0002.png, ...
+    │   └── output/          # 0001.json, 0002.json, ...
+    └── 02/
+        └── ...
 ```
+
+`capture` / `extract` / `repass` は `--volume N`（既定 1）で巻を指定します。
+2 巻以降は 1 巻で育った台帳を引き継いで抽出されるため、話者特定の精度が上がります。
 
 ### Step 1: キャプチャ
 
@@ -116,6 +125,7 @@ Kindle が自動で前面化され、スペースキーでページ送りしな�
 | `--delay` | 1.0 | ページ送り後の待機秒数。描画が間に合わない場合は増やす |
 | `--key` | space | ページ送りキー。`left` / `right` も指定可 |
 | `--start` | 1 | ファイル名の開始番号。途中から撮り直すときに使う |
+| `--volume` | 1 | 巻番号 |
 | `--root` | works | 作品ルートディレクトリ |
 
 例: 描画が遅いので 2 秒待ち、←キーで送る
@@ -135,7 +145,7 @@ uv run manga-dialogue extract "作品名"
 `captures/` の画像を番号順に Claude へ送り、1ページごとに `output/NNNN.json` を書き出します。
 新しく登場したキャラは `characters.json` に自動追記され、次のページ以降のプロンプトに反映されます。
 
-**名前がまだ分からないキャラの扱い（仮名）**: 継続登場しそうな人物は「ダンジの母（仮）」のような
+**名前がまだ分からないキャラの扱い（仮名）**: 継続登場しそうな人物は「主人公の母（仮）」のような
 仮名で台帳に登録され、以降のページでも同じ仮名で話者が紐づきます。後のページで本名が判明すると
 LLM が改名指示を返し、confidence が `--rename-threshold`（既定 0.8）以上なら台帳を更新
 （仮名は `aliases` に残る）し、**出力済み JSON の speaker も一括で置き換え**ます。
@@ -147,6 +157,7 @@ LLM が改名指示を返し、confidence が `--rename-threshold`（既定 0.8�
 | `--model` | claude-opus-5 | 使用するモデル。コストを抑えるなら `claude-sonnet-5` |
 | `--resume` | off | 出力済みのページをスキップして途中から再開 |
 | `--rename-threshold` | 0.8 | この confidence 以上の改名指示を自動適用 |
+| `--volume` | 1 | 巻番号 |
 | `--root` | works | 作品ルートディレクトリ |
 
 途中でエラーになった場合は `--resume` を付けて再実行してください。
@@ -168,13 +179,35 @@ uv run manga-dialogue repass "作品名"
 
 | オプション | 既定値 | 説明 |
 |---|---|---|
-| `--min-confidence` | 0.7 | この値未満の confidence を含むページを対象にする |
+| `--min-confidence` | 0.5 | この値未満の confidence を含むページを対象にする（0 にすると `不明` を含むページのみ） |
 | `--all` | off | 条件に関係なく全ページを再抽出 |
+| `--page N` | – | 指定ページだけ再抽出（複数指定可） |
 | `--dry-run` | off | 対象ページの一覧だけ表示（費用なし） |
+| `--volume` | （全巻） | 巻番号。省略すると全巻が対象 |
 | `--model` | claude-opus-5 | 使用するモデル |
 
 対象ページ分の API 費用が再度かかります。先に `--dry-run` で件数を確認してください。
 再抽出したページは JSON に `"repassed": true` が付きます。
+
+### Step 4: 台帳の整理（consolidate）
+
+ページ単位の抽出では、名前が呼ばれたページと人物がよく見えるページがずれて
+仮名が解決されないことがあります。`consolidate` は台帳と全巻の全セリフをテキストで
+まとめて 1 回だけ LLM に渡し、「仮名 → 実名」「同一人物の重複統合」を根拠付きで
+提案させます。画像を送らないので費用はごく小さく、`--dry-run` で提案だけ確認できます。
+
+```bash
+uv run manga-dialogue consolidate "作品名" --dry-run   # 提案を見る
+uv run manga-dialogue consolidate "作品名"             # 閾値以上を適用
+```
+
+| オプション | 既定値 | 説明 |
+|---|---|---|
+| `--rename-threshold` | 0.8 | この confidence 以上の提案を自動適用。未満は `pending_renames.jsonl` に記録 |
+| `--dry-run` | off | 提案を表示するだけ |
+
+`extract` / `repass` の実行中には使わないでください（台帳が上書きされます）。
+統合後に `repass` を再実行すると、統合された名前で再抽出されます。
 
 ### 手動での改名（rename）
 
@@ -182,7 +215,7 @@ uv run manga-dialogue repass "作品名"
 speaker（「〜（心の声）」も含む）を置き換えます。API は呼びません。
 
 ```bash
-uv run manga-dialogue rename "作品名" "ダンジの母（仮）" "ヤマハ"
+uv run manga-dialogue rename "作品名" "主人公の母（仮）" "花子"
 ```
 
 ### 出力形式
@@ -191,11 +224,12 @@ uv run manga-dialogue rename "作品名" "ダンジの母（仮）" "ヤマハ"
 
 ```json
 {
+  "volume": 1,
   "page": 1,
   "image": "0001.png",
   "lines": [
-    {"panel": 1, "speaker": "ナレーション", "text": "……", "confidence": 1.0},
-    {"panel": 2, "speaker": "太郎", "text": "……", "confidence": 0.9}
+    {"panel": 1, "speaker": "ナレーション", "text": "……", "confidence": 1.0, "x": 0.8, "y": 0.1},
+    {"panel": 2, "speaker": "太郎", "text": "……", "confidence": 0.9, "x": 0.3, "y": 0.5}
   ],
   "new_characters": [
     {"name": "太郎", "aliases": [], "appearance": "黒髪短髪、学生服"}
@@ -208,6 +242,8 @@ uv run manga-dialogue rename "作品名" "ダンジの母（仮）" "ヤマハ"
 - `panel`: ページ内のコマ番号（右→左、上→下）
 - `speaker`: 話者。ナレーションは `ナレーション`、心の声は `太郎（心の声）`、特定できない場合は `不明`
 - `confidence`: 話者特定の確信度（0〜1）
+- `x`, `y`: 吹き出し中心の位置（画像左上が 0,0、右下が 1,1）。`lines` はコマ番号順、
+  同じコマ内は座標から右→左・上→下に並べ替え済み
 
 ### キャラ台帳の手動編集
 

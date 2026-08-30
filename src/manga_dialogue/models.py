@@ -16,6 +16,8 @@ class Line(BaseModel):
     speaker: str = Field(description="話者名。ナレーションは「ナレーション」、不明は「不明」")
     text: str
     confidence: float = Field(ge=0.0, le=1.0, description="話者特定の確信度")
+    x: float | None = Field(default=None, ge=0.0, le=1.0, description="吹き出し中心の横位置。画像左端 0.0〜右端 1.0")
+    y: float | None = Field(default=None, ge=0.0, le=1.0, description="吹き出し中心の縦位置。画像上端 0.0〜下端 1.0")
 
 
 class Rename(BaseModel):
@@ -25,6 +27,32 @@ class Rename(BaseModel):
     to_name: str = Field(description="判明した本名")
     confidence: float = Field(ge=0.0, le=1.0, description="同一人物である確信度")
     reason: str = Field(default="", description="そう判断した根拠（呼びかけ・名乗りなど）")
+
+
+COLUMN_BAND = 0.15
+
+
+def sort_reading_order(lines: list["Line"]) -> list["Line"]:
+    """コマ番号順に並べ、同じコマ内は座標から 右→左、上→下 の読み順に並べ替える。
+
+    横位置が COLUMN_BAND 以内の吹き出しは同じ縦の列とみなして上から順にする。
+    座標のない行は元の順序を保つ。
+    """
+    result: list[Line] = []
+    panels = sorted({l.panel for l in lines})
+    for panel in panels:
+        group = [l for l in lines if l.panel == panel]
+        if any(l.x is None or l.y is None for l in group):
+            result.extend(group)
+            continue
+        remaining = sorted(group, key=lambda l: -l.x)
+        while remaining:
+            anchor = remaining[0]
+            column = [l for l in remaining if anchor.x - l.x <= COLUMN_BAND]
+            column.sort(key=lambda l: l.y)
+            result.extend(column)
+            remaining = [l for l in remaining if l not in column]
+    return result
 
 
 class PageExtraction(BaseModel):
@@ -44,6 +72,7 @@ class PageExtraction(BaseModel):
 class PageResult(BaseModel):
     """ページ番号を付与して保存する抽出結果"""
 
+    volume: int = 1
     page: int
     image: str
     lines: list[Line]
