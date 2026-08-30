@@ -135,16 +135,54 @@ uv run manga-dialogue extract "作品名"
 `captures/` の画像を番号順に Claude へ送り、1ページごとに `output/NNNN.json` を書き出します。
 新しく登場したキャラは `characters.json` に自動追記され、次のページ以降のプロンプトに反映されます。
 
+**名前がまだ分からないキャラの扱い（仮名）**: 継続登場しそうな人物は「ダンジの母（仮）」のような
+仮名で台帳に登録され、以降のページでも同じ仮名で話者が紐づきます。後のページで本名が判明すると
+LLM が改名指示を返し、confidence が `--rename-threshold`（既定 0.8）以上なら台帳を更新
+（仮名は `aliases` に残る）し、**出力済み JSON の speaker も一括で置き換え**ます。
+閾値未満の候補は `works/<作品名>/pending_renames.jsonl` に記録されるだけなので、
+内容を確認して `rename` コマンドで手動適用してください。
+
 | オプション | 既定値 | 説明 |
 |---|---|---|
 | `--model` | claude-opus-5 | 使用するモデル。コストを抑えるなら `claude-sonnet-5` |
 | `--resume` | off | 出力済みのページをスキップして途中から再開 |
+| `--rename-threshold` | 0.8 | この confidence 以上の改名指示を自動適用 |
 | `--root` | works | 作品ルートディレクトリ |
 
 途中でエラーになった場合は `--resume` を付けて再実行してください。
 
 ```bash
 uv run manga-dialogue extract "作品名" --resume
+```
+
+### Step 3: 再抽出（repass）
+
+序盤のページは、後で判明する名前や登場人物を知らない状態で処理されているため、
+`不明` や低 confidence が残りがちです。`repass` はその時点までに処理した範囲の台帳
+（作品が完結している必要はありません）を使って、`不明` または低 confidence のセリフを含む
+ページだけを再抽出し、出力 JSON を上書きします。仮名の改名で解決しなかったケースの救済策です。
+
+```bash
+uv run manga-dialogue repass "作品名"
+```
+
+| オプション | 既定値 | 説明 |
+|---|---|---|
+| `--min-confidence` | 0.7 | この値未満の confidence を含むページを対象にする |
+| `--all` | off | 条件に関係なく全ページを再抽出 |
+| `--dry-run` | off | 対象ページの一覧だけ表示（費用なし） |
+| `--model` | claude-opus-5 | 使用するモデル |
+
+対象ページ分の API 費用が再度かかります。先に `--dry-run` で件数を確認してください。
+再抽出したページは JSON に `"repassed": true` が付きます。
+
+### 手動での改名（rename）
+
+仮名や誤った名前を手で直したいときは `rename` を使います。台帳を更新し、出力済み JSON の
+speaker（「〜（心の声）」も含む）を置き換えます。API は呼びません。
+
+```bash
+uv run manga-dialogue rename "作品名" "ダンジの母（仮）" "ヤマハ"
 ```
 
 ### 出力形式
@@ -161,7 +199,9 @@ uv run manga-dialogue extract "作品名" --resume
   ],
   "new_characters": [
     {"name": "太郎", "aliases": [], "appearance": "黒髪短髪、学生服"}
-  ]
+  ],
+  "renames": [],
+  "repassed": false
 }
 ```
 

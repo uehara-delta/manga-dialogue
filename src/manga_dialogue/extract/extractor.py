@@ -21,8 +21,13 @@ def extract_page(
     image_path: Path,
     book: CharacterBook,
     model: str = DEFAULT_MODEL,
+    final_book: bool = False,
 ) -> PageExtraction:
-    """画像1枚を Anthropic API に送り、セリフと新キャラを構造化して返す"""
+    """画像1枚を Anthropic API に送り、セリフと新キャラを構造化して返す
+
+    final_book=True のときは台帳が完成済みであることをプロンプトで伝え、
+    「不明」を減らすよう促す。
+    """
     data = base64.standard_b64encode(image_path.read_bytes()).decode("ascii")
     media_type = MEDIA_TYPES[image_path.suffix.lower()]
 
@@ -35,7 +40,7 @@ def extract_page(
                 "role": "user",
                 "content": [
                     {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}},
-                    {"type": "text", "text": build_user_prompt(book.to_prompt_text())},
+                    {"type": "text", "text": build_user_prompt(book.to_prompt_text(), final_book=final_book)},
                 ],
             }
         ],

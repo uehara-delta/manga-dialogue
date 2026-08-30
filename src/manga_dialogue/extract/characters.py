@@ -45,6 +45,38 @@ class CharacterBook:
             added.append(c)
         return added
 
+    def find(self, name: str) -> Character | None:
+        for c in self.characters:
+            if c.name == name or name in c.aliases:
+                return c
+        return None
+
+    def rename(self, from_name: str, to_name: str) -> bool:
+        """from_name のキャラを to_name に改名する。旧名は aliases に残す。
+
+        to_name が既に別エントリとして存在する場合はそちらに統合する。
+        該当キャラがなければ False。
+        """
+        src = self.find(from_name)
+        if src is None or from_name == to_name:
+            return False
+        dst = self.find(to_name)
+        if dst is not None and dst is not src:
+            for alias in [src.name, *src.aliases]:
+                if alias != dst.name and alias not in dst.aliases:
+                    dst.aliases.append(alias)
+            if not dst.appearance:
+                dst.appearance = src.appearance
+            self.characters.remove(src)
+            return True
+        if src.name != to_name:
+            if src.name not in src.aliases:
+                src.aliases.append(src.name)
+            src.name = to_name
+            if to_name in src.aliases:
+                src.aliases.remove(to_name)
+        return True
+
     def to_prompt_text(self) -> str:
         if not self.characters:
             return "（まだ登録されていません）"
