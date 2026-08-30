@@ -89,22 +89,28 @@ tmux 内からは効きません。**tmux を使わない素のターミナル�
 ## 使い方
 
 作業データはすべて `works/<作品名>/` 配下に作品ごとに保存されます。
-キャラ台帳は作品単位で共有し、キャプチャと抽出結果は巻ごとに分かれます。
+キャプチャは巻ごと、キャラ台帳と抽出結果は **run** ごとに分かれます。run は「どのモデル・
+どの設定で抽出したか」の単位で、モデルを変えて結果を比較するときに別 run を使います。
 
 ```
 works/<作品名>/
-├── characters.json          # キャラ台帳（作品全体で共有。extract が自動生成・更新）
-├── pending_renames.jsonl    # 保留中の改名候補
-└── volumes/
-    ├── 01/
-    │   ├── captures/        # 0001.png, 0002.png, ...
-    │   └── output/          # 0001.json, 0002.json, ...
-    └── 02/
+├── volumes/
+│   ├── 01/captures/             # 0001.png, ...（run 間で共有）
+│   └── 02/captures/
+└── runs/
+    ├── default/                 # 既定の run
+    │   ├── characters.json      # キャラ台帳（作品全体で共有。extract が自動生成・更新）
+    │   ├── pending_renames.jsonl
+    │   └── volumes/01/output/   # 0001.json, ...
+    └── gemini/                  # 例: 別モデルで抽出した run
         └── ...
 ```
 
-`capture` / `extract` / `repass` は `--volume N`（既定 1）で巻を指定します。
-2 巻以降は 1 巻で育った台帳を引き継いで抽出されるため、話者特定の精度が上がります。
+- `capture` / `extract` / `repass` は `--volume N`（既定 1）で巻を指定します。
+  2 巻以降は 1 巻で育った台帳を引き継いで抽出されるため、話者特定の精度が上がります
+- `extract` / `repass` / `consolidate` / `rename` / `fix` / `export` は `--run 名前`（既定 `default`）で
+  対象の run を指定します。新しい run を既存 run の台帳から始めるには
+  `extract ... --run gemini --from-run default` のように `--from-run` を付けます
 
 ### Step 1: キャプチャ
 
@@ -154,7 +160,8 @@ LLM が改名指示を返し、confidence が `--rename-threshold`（既定 0.8�
 
 | オプション | 既定値 | 説明 |
 |---|---|---|
-| `--model` | claude-opus-5 | 使用するモデル。コストを抑えるなら `claude-sonnet-5` |
+| `--model` | claude-opus-5 | 使用するモデル。`claude-*`（Anthropic）または `gemini-*`（Google）。詳細は下記 |
+| `--run` / `--from-run` | default / – | 結果を保存する run と、台帳のコピー元 run |
 | `--resume` | off | 出力済みのページをスキップして途中から再開 |
 | `--rename-threshold` | 0.8 | この confidence 以上の改名指示を自動適用 |
 | `--volume` | 1 | 巻番号 |
@@ -164,6 +171,23 @@ LLM が改名指示を返し、confidence が `--rename-threshold`（既定 0.8�
 
 ```bash
 uv run manga-dialogue extract "作品名" --resume
+```
+
+#### モデルの選択（Anthropic / Google Gemini）
+
+`--model` の名前でプロバイダが自動的に選ばれます。
+
+| 接頭辞 | プロバイダ | API キー | 例 |
+|---|---|---|---|
+| `claude-` | Anthropic | `ANTHROPIC_API_KEY` | `claude-opus-5`（既定）、`claude-sonnet-5` |
+| `gemini-` | Google Gemini | `GEMINI_API_KEY` | `gemini-3.7-flash` |
+
+Gemini の API キーは https://aistudio.google.com/ の **Get API key** から取得し、`.env` に
+`GEMINI_API_KEY=...` を追記します。モデルを変えて比較するときは run を分けてください。
+
+```bash
+uv run --env-file .env manga-dialogue extract "作品名" --model gemini-3.7-flash --run gemini --from-run default
+uv run manga-dialogue export "作品名" --run gemini --format tsv
 ```
 
 ### Step 3: 再抽出（repass）
@@ -341,7 +365,9 @@ src/manga_dialogue/
 ├── models.py       # データモデル（pydantic）
 ├── workspace.py    # 作品ディレクトリのパス管理
 ├── capture/        # OS 依存のキャプチャ層（base / mac / windows）
-└── extract/        # 画像 → LLM → JSON（characters / prompt / extractor）
+├── extract/        # 画像 → LLM → JSON（characters / prompt / extractor / consolidate / fix）
+│   └── llm/        # プロバイダ抽象化（anthropic_model / gemini_model）
+└── output/         # エクスポート（CSV / TSV / Markdown）
 ```
 
 OS 依存コードは `capture/` にのみ置き、他の層は OS 非依存を保ってください。

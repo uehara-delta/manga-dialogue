@@ -11,7 +11,7 @@ FORMATS = {"csv": ".csv", "tsv": ".tsv", "markdown": ".md"}
 
 def collect_rows(work: Work, volume: int | None = None) -> list[dict]:
     """作品（または指定巻）の全セリフを読み順に平坦化する"""
-    volumes = [Work(work.title, work.root, volume)] if volume is not None else work.all_volumes()
+    volumes = [work.with_volume(volume)] if volume is not None else work.all_volumes()
     rows: list[dict] = []
     for vol in volumes:
         for out in vol.output_files():

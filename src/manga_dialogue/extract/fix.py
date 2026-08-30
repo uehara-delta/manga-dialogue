@@ -1,18 +1,10 @@
 import json
-import time
-from pathlib import Path
 
-import anthropic
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 from manga_dialogue.extract.characters import CharacterBook
-from manga_dialogue.extract.extractor import (
-    API_BACKOFF_SECONDS,
-    DEFAULT_MODEL,
-    MAX_API_ATTEMPTS,
-    TRANSIENT_API_ERRORS,
-    encode_image,
-)
+from manga_dialogue.extract.extractor import load_image_part
+from manga_dialogue.extract.llm import Part, TextPart, VisionModel
 from manga_dialogue.models import PageResult
 from manga_dialogue.workspace import Work
 
@@ -27,9 +19,6 @@ FIX_SYSTEM_PROMPT = """\
 - reason には根拠を簡潔に書いてください。
 - 指示の範囲を超えた修正はしないでください。判断に迷う場合は変更しません。
 """
-
-MAX_ATTEMPTS = 3
-
 
 class LineChange(BaseModel):
     volume: int
@@ -46,7 +35,7 @@ class FixPlan(BaseModel):
 
 
 def load_pages(work: Work, volume: int | None, pages: list[int]) -> list[tuple[Work, PageResult]]:
-    volumes = [Work(work.title, work.root, volume)] if volume is not None else work.all_volumes()
+    volumes = [work.with_volume(volume)] if volume is not None else work.all_volumes()
     results: list[tuple[Work, PageResult]] = []
     for vol in volumes:
         for out in vol.output_files():
@@ -66,14 +55,13 @@ def _dialogue_block(targets: list[tuple[Work, PageResult]]) -> str:
 
 
 def propose_fix(
-    client: anthropic.Anthropic,
+    llm: VisionModel,
     book: CharacterBook,
     targets: list[tuple[Work, PageResult]],
     instruction: str,
-    model: str = DEFAULT_MODEL,
     with_images: bool = False,
 ) -> FixPlan:
-    """指示に基づく修正案を LLM に作らせる。with_images で対象ページの画像も添付する"""
+    """指示に基づく修正案をモデルに作らせる。with_images で対象ページの画像も添付する"""
     text = f"""\
 ## キャラ台帳
 {book.to_prompt_text()}
@@ -84,42 +72,13 @@ def propose_fix(
 ## 修正の指示
 {instruction}
 """
-    content: list[dict] = []
+    parts: list[Part] = []
     if with_images:
         for vol, result in targets:
-            media_type, data = encode_image(vol.capture_path(result.page))
-            content.append({"type": "text", "text": f"（{result.volume}巻 p{result.page:03d} の画像）"})
-            content.append({"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}})
-    content.append({"type": "text", "text": text})
-
-    last_error: Exception | None = None
-    parse_failures = api_failures = 0
-    while parse_failures < MAX_ATTEMPTS and api_failures < MAX_API_ATTEMPTS:
-        try:
-            with client.messages.stream(
-                model=model,
-                max_tokens=32000,
-                system=FIX_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": content}],
-                output_format=FixPlan,
-            ) as stream:
-                response = stream.get_final_message()
-            if response.stop_reason == "refusal":
-                raise RuntimeError("モデルが処理を拒否しました")
-            if response.parsed_output is None:
-                raise ValueError(f"構造化出力を取得できませんでした (stop_reason={response.stop_reason})")
-            return response.parsed_output
-        except (ValidationError, ValueError) as e:
-            last_error = e
-            parse_failures += 1
-            time.sleep(5 * parse_failures)
-        except TRANSIENT_API_ERRORS as e:
-            last_error = e
-            api_failures += 1
-            time.sleep(API_BACKOFF_SECONDS * api_failures)
-    raise RuntimeError(
-        f"再試行しても処理できませんでした (解析失敗 {parse_failures} 回, API エラー {api_failures} 回)"
-    ) from last_error
+            parts.append(TextPart(f"（{result.volume}巻 p{result.page:03d} の画像）"))
+            parts.append(load_image_part(vol.capture_path(result.page)))
+    parts.append(TextPart(text))
+    return llm.complete(FIX_SYSTEM_PROMPT, parts, FixPlan, max_tokens=32000)
 
 
 def apply_changes(work: Work, changes: list[LineChange]) -> int:
@@ -129,7 +88,7 @@ def apply_changes(work: Work, changes: list[LineChange]) -> int:
         by_page.setdefault((c.volume, c.page), []).append(c)
     applied = 0
     for (volume, page), items in by_page.items():
-        vol = Work(work.title, work.root, volume)
+        vol = work.with_volume(volume)
         path = vol.output_path(page)
         if not path.exists():
             continue

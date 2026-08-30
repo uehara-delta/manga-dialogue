@@ -1,3 +1,4 @@
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -168,9 +169,20 @@ def _same_column(anchor: "Line", other: "Line") -> bool:
     return dx <= COLUMN_BAND and dy >= dx
 
 
+_ASCII_GAP = re.compile(r"(?<=[A-Za-z0-9])\s+|\s+(?=[A-Za-z0-9])")
+_OTHER_GAP = re.compile(r"\s+")
+
+
+def collapse_whitespace(text: str) -> str:
+    """吹き出し内の改行・空白を詰める。英数字に隣接する空白だけは半角スペース 1 つを残す"""
+    text = _ASCII_GAP.sub("\x00", text.strip())
+    text = _OTHER_GAP.sub("", text)
+    return text.replace("\x00", " ")
+
+
 def normalize_text(lines: list["Line"]) -> list["Line"]:
     """吹き出し内の改行を詰めて 1 行にする"""
-    return [l.model_copy(update={"text": " ".join(l.text.split())}) for l in lines]
+    return [l.model_copy(update={"text": collapse_whitespace(l.text)}) for l in lines]
 
 
 class PageExtraction(BaseModel):

@@ -14,7 +14,7 @@
 1. capture/  … CaptureDriver 抽象クラス + MacKindleDriver / WindowsKindleDriver
    - ウィンドウ特定・前面化、ページ送り、スクショ（mss）
    - 「ページ送り後に画像が変化しない」ことで最終ページを判定
-2. extract/  … 画像 → マルチモーダルLLM（Anthropic API）→ JSON
+2. extract/  … 画像 → マルチモーダルLLM（Anthropic / Google Gemini。extract/llm/ で抽象化）→ JSON
    - キャラ台帳（名前・外見特徴）をプロンプトに毎回含め、新キャラは台帳に追記
    - 出力: [{page, panel, speaker, text, confidence}]
 3. output/   … JSON / CSV / Markdown 出力
@@ -24,4 +24,4 @@
 - 見開き表示は右→左、上→下のコマ順で読む
 - ナレーション・モノローグは speaker="ナレーション" 等で区別
 - Windows のexe化は GitHub Actions (windows-latest) + PyInstaller で行う
-- APIキーは環境変数 ANTHROPIC_API_KEY。コミットしない
+- APIキーは環境変数 ANTHROPIC_API_KEY / GEMINI_API_KEY（.env は uv --env-file で読む）。コミットしない

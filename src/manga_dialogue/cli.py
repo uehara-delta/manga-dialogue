@@ -2,17 +2,17 @@ import json
 import sys
 from pathlib import Path
 
-import anthropic
 import typer
 
 from manga_dialogue.extract.characters import CharacterBook
 from manga_dialogue.extract.consolidate import propose_consolidation
 from manga_dialogue.extract.extractor import DEFAULT_MODEL, ExtractionFailed, extract_page
+from manga_dialogue.extract.llm import VisionModel, get_model
 from manga_dialogue.extract.fix import apply_changes, load_pages, propose_fix
 from manga_dialogue.extract.renames import apply_rename, record_pending
 from manga_dialogue.models import PageResult
 from manga_dialogue.output.export import FORMATS, export
-from manga_dialogue.workspace import DEFAULT_ROOT, Work
+from manga_dialogue.workspace import DEFAULT_ROOT, DEFAULT_RUN, Work
 
 app = typer.Typer(help="Kindle の漫画画面をキャプチャし、セリフを文字起こしする")
 
@@ -23,12 +23,12 @@ class Reporter:
     def __init__(self, as_json: bool) -> None:
         self.as_json = as_json
 
-    def event(self, event: str, message: str = "", **data) -> None:
+    def event(self, event: str, _text: str = "", **data) -> None:
         if self.as_json:
             sys.stdout.write(json.dumps({"event": event, **data}, ensure_ascii=False) + "\n")
             sys.stdout.flush()
-        elif message:
-            typer.echo(message)
+        elif _text:
+            typer.echo(_text)
 
     def error(self, message: str, **data) -> None:
         if self.as_json:
@@ -78,12 +78,19 @@ def capture(
     reporter.event("done", f"完了: {saved} ページ保存", saved=saved)
 
 
+def _get_model(model: str) -> VisionModel:
+    try:
+        return get_model(model)
+    except ValueError as e:
+        reporter.error(str(e))
+        raise typer.Exit(1)
+
+
 def _process_page(
-    client: anthropic.Anthropic,
+    llm: VisionModel,
     work: Work,
     image: Path,
     book: CharacterBook,
-    model: str,
     rename_threshold: float,
     final_book: bool = False,
 ) -> PageResult:
@@ -93,7 +100,7 @@ def _process_page(
     未満なら pending_renames.jsonl に記録するだけにする。
     """
     page = int(image.stem)
-    extraction = extract_page(client, image, book, model=model, final_book=final_book)
+    extraction = extract_page(llm, image, book, final_book=final_book)
     added = book.merge(extraction.new_characters)
     book.save()
     result = PageResult(
@@ -154,10 +161,14 @@ def extract(
     resume: bool = typer.Option(False, help="出力済みページをスキップして再開"),
     rename_threshold: float = typer.Option(0.8, help="この confidence 以上の改名指示を自動適用"),
     volume: int = typer.Option(1, help="巻番号"),
+    run: str = typer.Option(DEFAULT_RUN, help="結果を保存する run 名（モデルごとに分けるなど）"),
+    from_run: str | None = typer.Option(None, help="新しい run を始めるとき、この run の台帳をコピーして使う"),
     root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
 ) -> None:
     """キャプチャ画像を順に LLM へ送り、ページごとに JSON を出力する"""
-    work = Work(title, root, volume)
+    work = Work(title, root, volume, run)
+    if from_run:
+        work.init_run_from(from_run)
     images = work.capture_images()
     if not images:
         reporter.error(f"画像がありません: {work.captures_dir}")
@@ -165,7 +176,7 @@ def extract(
 
     work.ensure_dirs()
     book = CharacterBook.load(work.characters_path)
-    client = anthropic.Anthropic()
+    llm = _get_model(model)
     reporter.event("start", total=len(images), volume=volume)
 
     failed: list[str] = []
@@ -173,7 +184,7 @@ def extract(
         if resume and work.output_path(int(image.stem)).exists():
             continue
         try:
-            _process_page(client, work, image, book, model, rename_threshold)
+            _process_page(llm, work, image, book, rename_threshold)
         except ExtractionFailed as e:
             reporter.event("page_failed", f"失敗（スキップ）: {e}", volume=volume, page=int(image.stem), message=str(e))
             failed.append(image.name)
@@ -193,6 +204,7 @@ def repass(
     dry_run: bool = typer.Option(False, help="対象ページの一覧だけ表示して終了"),
     rename_threshold: float = typer.Option(0.8, help="この confidence 以上の改名指示を自動適用"),
     volume: int | None = typer.Option(None, help="巻番号（省略時は全巻）"),
+    run: str = typer.Option(DEFAULT_RUN, help="結果を保存する run 名（モデルごとに分けるなど）"),
     root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
 ) -> None:
     """処理済み範囲の台帳を使い、「不明」や低 confidence を含むページだけ再抽出する
@@ -200,13 +212,13 @@ def repass(
     extract を最後まで通した後に実行する。対象ページの出力 JSON は上書きされる。
     手動修正済みのページは --force を付けない限りスキップする。
     """
-    work = Work(title, root)
+    work = Work(title, root, run=run)
     book = CharacterBook.load(work.characters_path)
     if not book.characters:
         reporter.error(f"台帳が空です。先に extract を実行してください: {work.characters_path}")
         raise typer.Exit(1)
 
-    volumes = [Work(title, root, volume)] if volume is not None else work.all_volumes()
+    volumes = [work.with_volume(volume)] if volume is not None else work.all_volumes()
     targets: list[tuple[Work, Path]] = []
     skipped_manual: list[str] = []
     for vol in volumes:
@@ -240,11 +252,11 @@ def repass(
             reporter.event("target", f"  v{vol.volume:02d} {t.name}", volume=vol.volume, page=int(t.stem))
         return
 
-    client = anthropic.Anthropic()
+    llm = _get_model(model)
     failed: list[str] = []
     for vol, image in targets:
         try:
-            _process_page(client, vol, image, book, model, rename_threshold, final_book=True)
+            _process_page(llm, vol, image, book, rename_threshold, final_book=True)
         except ExtractionFailed as e:
             reporter.event("page_failed", f"失敗（スキップ）: {e}", volume=vol.volume, page=int(image.stem), message=str(e))
             failed.append(f"v{vol.volume:02d}/{image.name}")
@@ -259,20 +271,21 @@ def consolidate(
     model: str = typer.Option(DEFAULT_MODEL, help="使用するモデル ID"),
     rename_threshold: float = typer.Option(0.8, help="この confidence 以上の提案を自動適用"),
     dry_run: bool = typer.Option(False, help="提案を表示するだけで適用しない"),
+    run: str = typer.Option(DEFAULT_RUN, help="結果を保存する run 名（モデルごとに分けるなど）"),
     root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
 ) -> None:
     """全セリフを通読させて仮名の解決・重複統合を提案させ、台帳と出力に適用する
 
     画像は送らずテキストのみで 1 回だけ API を呼ぶ。extract / repass の実行中には使わない。
     """
-    work = Work(title, root)
+    work = Work(title, root, run=run)
     book = CharacterBook.load(work.characters_path)
     if not book.characters or not any(v.output_files() for v in work.all_volumes()):
         reporter.error("台帳または出力がありません。先に extract を実行してください")
         raise typer.Exit(1)
 
-    client = anthropic.Anthropic()
-    plan = propose_consolidation(client, book, work, model)
+    llm = _get_model(model)
+    plan = propose_consolidation(llm, book, work)
     reporter.event("start", f"提案: {len(plan.renames)} 件", total=len(plan.renames))
     applied = 0
     for r in plan.renames:
@@ -300,10 +313,11 @@ def rename(
     title: str = typer.Argument(help="作品名"),
     from_name: str = typer.Argument(help="台帳にある現在の名前（仮名など）"),
     to_name: str = typer.Argument(help="新しい名前"),
+    run: str = typer.Option(DEFAULT_RUN, help="結果を保存する run 名（モデルごとに分けるなど）"),
     root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
 ) -> None:
     """台帳のキャラを手動で改名し、出力済み JSON の speaker も置き換える"""
-    work = Work(title, root)
+    work = Work(title, root, run=run)
     book = CharacterBook.load(work.characters_path)
     if book.find(from_name) is None:
         reporter.error(f"台帳に見つかりません: {from_name}")
@@ -318,13 +332,14 @@ def export_cmd(
     fmt: str = typer.Option("csv", "--format", help="csv / tsv / markdown"),
     dest: Path | None = typer.Option(None, "--out", help="出力先ファイル（省略時は works/<作品名>/ 直下）"),
     volume: int | None = typer.Option(None, help="巻番号（省略時は全巻）"),
+    run: str = typer.Option(DEFAULT_RUN, help="結果を保存する run 名（モデルごとに分けるなど）"),
     root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
 ) -> None:
     """抽出結果を CSV / TSV / Markdown に書き出す"""
     if fmt not in FORMATS:
         reporter.error(f"未対応の形式: {fmt}（csv / tsv / markdown）")
         raise typer.Exit(1)
-    work = Work(title, root)
+    work = Work(title, root, run=run)
     path, rows = export(work, fmt, dest, volume)
     reporter.event("done", f"書き出し: {path} ({rows} 行)", path=str(path), rows=rows)
 
@@ -338,21 +353,22 @@ def fix(
     with_images: bool = typer.Option(False, help="対象ページの画像も添付する（費用増）"),
     apply: bool = typer.Option(False, help="変更案を適用する（省略時は提案のみ）"),
     model: str = typer.Option(DEFAULT_MODEL, help="使用するモデル ID"),
+    run: str = typer.Option(DEFAULT_RUN, help="結果を保存する run 名（モデルごとに分けるなど）"),
     root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
 ) -> None:
     """指示文に基づいて抽出結果の一括修正案を作り、必要なら適用する
 
     適用した行には manual が付き、以降の repass で上書きされなくなる。
     """
-    work = Work(title, root)
+    work = Work(title, root, run=run)
     book = CharacterBook.load(work.characters_path)
     targets = load_pages(work, volume, pages)
     if not targets:
         reporter.error("対象ページがありません")
         raise typer.Exit(1)
 
-    client = anthropic.Anthropic()
-    plan = propose_fix(client, book, targets, instruction, model=model, with_images=with_images)
+    llm = _get_model(model)
+    plan = propose_fix(llm, book, targets, instruction, with_images=with_images)
     reporter.event("start", f"変更案: {len(plan.changes)} 件（対象 {len(targets)} ページ）", total=len(plan.changes), pages=len(targets))
     by_page = {(v.volume, r.page): r for v, r in targets}
     for c in plan.changes:

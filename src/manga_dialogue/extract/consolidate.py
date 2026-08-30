@@ -1,12 +1,9 @@
 import json
-import time
-from pathlib import Path
 
-import anthropic
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 from manga_dialogue.extract.characters import CharacterBook
-from manga_dialogue.extract.extractor import API_BACKOFF_SECONDS, MAX_API_ATTEMPTS, TRANSIENT_API_ERRORS
+from manga_dialogue.extract.llm import TextPart, VisionModel
 from manga_dialogue.models import PageResult, Rename
 from manga_dialogue.workspace import Work
 
@@ -34,9 +31,6 @@ CONSOLIDATE_SYSTEM_PROMPT = """\
 """
 
 
-MAX_ATTEMPTS = 3
-
-
 class ConsolidationPlan(BaseModel):
     renames: list[Rename] = Field(default_factory=list)
 
@@ -52,13 +46,8 @@ def build_dialogue_text(work: Work) -> str:
     return "\n".join(lines)
 
 
-def propose_consolidation(
-    client: anthropic.Anthropic,
-    book: CharacterBook,
-    work: Work,
-    model: str,
-) -> ConsolidationPlan:
-    """台帳と全セリフから、仮名の解決と重複統合の案を LLM に作らせる"""
+def propose_consolidation(llm: VisionModel, book: CharacterBook, work: Work) -> ConsolidationPlan:
+    """台帳と全セリフから、仮名の解決と重複統合の案をモデルに作らせる"""
     book_json = json.dumps(
         {"characters": [c.model_dump() for c in book.characters]}, ensure_ascii=False, indent=1
     )
@@ -71,35 +60,4 @@ def propose_consolidation(
 
 台帳を整理するための renames を返してください。
 """
-    last_error: Exception | None = None
-    parse_failures = api_failures = 0
-    while parse_failures < MAX_ATTEMPTS and api_failures < MAX_API_ATTEMPTS:
-        try:
-            return _request(client, user, model)
-        except (ValidationError, ValueError) as e:
-            last_error = e
-            parse_failures += 1
-            time.sleep(5 * parse_failures)
-        except TRANSIENT_API_ERRORS as e:
-            last_error = e
-            api_failures += 1
-            time.sleep(API_BACKOFF_SECONDS * api_failures)
-    raise RuntimeError(
-        f"再試行しても処理できませんでした (解析失敗 {parse_failures} 回, API エラー {api_failures} 回)"
-    ) from last_error
-
-
-def _request(client: anthropic.Anthropic, user: str, model: str) -> ConsolidationPlan:
-    with client.messages.stream(
-        model=model,
-        max_tokens=64000,
-        system=CONSOLIDATE_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user}],
-        output_format=ConsolidationPlan,
-    ) as stream:
-        response = stream.get_final_message()
-    if response.stop_reason == "refusal":
-        raise RuntimeError("モデルが処理を拒否しました")
-    if response.parsed_output is None:
-        raise ValueError(f"構造化出力を取得できませんでした (stop_reason={response.stop_reason})")
-    return response.parsed_output
+    return llm.complete(CONSOLIDATE_SYSTEM_PROMPT, [TextPart(user)], ConsolidationPlan, max_tokens=64000)

@@ -11,6 +11,7 @@ dependencies = [
     "typer>=0.15",
     "pyobjc-framework-Quartz>=11.0; sys_platform == 'darwin'",
     "pyobjc-framework-Cocoa>=11.0; sys_platform == 'darwin'",
+    "google-genai>=2.20.0",
 ]
 
 [project.scripts]
