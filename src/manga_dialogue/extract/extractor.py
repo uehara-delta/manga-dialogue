@@ -76,5 +76,5 @@ def _request(
     if response.parsed_output is None:
         raise ValueError(f"{image_path.name}: 構造化出力を取得できませんでした (stop_reason={response.stop_reason})")
     extraction = response.parsed_output
-    extraction.lines = sort_reading_order(extraction.lines)
+    extraction.lines = sort_reading_order(extraction.lines, extraction.panels)
     return extraction
