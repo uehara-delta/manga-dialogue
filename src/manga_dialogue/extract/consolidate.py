@@ -6,6 +6,7 @@ import anthropic
 from pydantic import BaseModel, Field, ValidationError
 
 from manga_dialogue.extract.characters import CharacterBook
+from manga_dialogue.extract.extractor import API_BACKOFF_SECONDS, MAX_API_ATTEMPTS, TRANSIENT_API_ERRORS
 from manga_dialogue.models import PageResult, Rename
 from manga_dialogue.workspace import Work
 
@@ -71,14 +72,21 @@ def propose_consolidation(
 台帳を整理するための renames を返してください。
 """
     last_error: Exception | None = None
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    parse_failures = api_failures = 0
+    while parse_failures < MAX_ATTEMPTS and api_failures < MAX_API_ATTEMPTS:
         try:
             return _request(client, user, model)
         except (ValidationError, ValueError) as e:
             last_error = e
-            if attempt < MAX_ATTEMPTS:
-                time.sleep(5 * attempt)
-    raise RuntimeError(f"{MAX_ATTEMPTS} 回試行しても出力を解析できませんでした") from last_error
+            parse_failures += 1
+            time.sleep(5 * parse_failures)
+        except TRANSIENT_API_ERRORS as e:
+            last_error = e
+            api_failures += 1
+            time.sleep(API_BACKOFF_SECONDS * api_failures)
+    raise RuntimeError(
+        f"再試行しても処理できませんでした (解析失敗 {parse_failures} 回, API エラー {api_failures} 回)"
+    ) from last_error
 
 
 def _request(client: anthropic.Anthropic, user: str, model: str) -> ConsolidationPlan:

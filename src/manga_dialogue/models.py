@@ -48,13 +48,23 @@ class Panel(BaseModel):
 GAP = 0.01
 
 
-def order_panels(panels: list[Panel]) -> list[Panel]:
-    """コマ矩形から日本の漫画の読み順（上の段から、段内は右→左）を再帰的に決める。
+SPREAD_CENTER = 0.5
+SPAN_MARGIN = 0.1
 
-    まず水平の切れ目で上下に分割し、分割できなければ垂直の切れ目で右から左に分割する。
+
+def order_panels(panels: list[Panel], spread: bool = False) -> list[Panel]:
+    """コマ矩形から日本の漫画の読み順を決める。
+
+    単ページ: 水平の切れ目で上下に分割し、分割できなければ垂直の切れ目で右から左に分割する
+    （再帰）。
+    見開き: 右ページと左ページはそれぞれ独立に読む（右ページの最後のコマが左ページの最初の
+    コマより前）。ただし両ページにまたがるコマがある場合は、そのコマを境に上下を分け、
+    「上の部分（右→左ページ）→ またがるコマ → 下の部分（右→左ページ）」の順にする。
     """
     if len(panels) <= 1:
         return list(panels)
+    if spread:
+        return _order_spread(panels)
     rows = _split(panels, axis="y")
     if len(rows) > 1:
         return [q for row in rows for q in order_panels(row)]
@@ -62,6 +72,26 @@ def order_panels(panels: list[Panel]) -> list[Panel]:
     if len(cols) > 1:
         return [q for col in reversed(cols) for q in order_panels(col)]
     return sorted(panels, key=lambda q: (q.y0, -q.x1))
+
+
+def _is_spanning(q: Panel) -> bool:
+    """両ページに SPAN_MARGIN 以上食い込むコマだけを「またがるコマ」とみなす。
+
+    矩形の見積もり誤差で中央線をわずかに越えただけのコマは、中心のあるページに属する。
+    """
+    return q.x0 < SPREAD_CENTER - SPAN_MARGIN and q.x1 > SPREAD_CENTER + SPAN_MARGIN
+
+
+def _order_spread(panels: list[Panel]) -> list[Panel]:
+    spanning = sorted((q for q in panels if _is_spanning(q)), key=lambda q: q.y0)
+    right = [q for q in panels if not _is_spanning(q) and (q.x0 + q.x1) / 2 >= SPREAD_CENTER]
+    left = [q for q in panels if not _is_spanning(q) and (q.x0 + q.x1) / 2 < SPREAD_CENTER]
+    if not spanning:
+        return order_panels(right) + order_panels(left)
+    top_span = spanning[0]
+    above = [q for q in panels if q is not top_span and q.y1 <= top_span.y0 + GAP]
+    below = [q for q in panels if q is not top_span and q not in above]
+    return _order_spread(above) + [top_span] + _order_spread(below)
 
 
 def _split(panels: list[Panel], axis: str) -> list[list[Panel]]:
@@ -93,15 +123,18 @@ def cap_context_confidence(lines: list["Line"]) -> list["Line"]:
     ]
 
 
-def sort_reading_order(lines: list["Line"], panels: list[Panel] | None = None) -> list["Line"]:
+def sort_reading_order(
+    lines: list["Line"], panels: list[Panel] | None = None, spread: bool = False
+) -> list["Line"]:
     """コマを読み順に並べ、同じコマ内は座標から 右→左、上→下 の読み順に並べ替える。
 
     panels が与えられればその矩形から読み順を決め、panel 番号を 1 から振り直す。
+    spread=True なら見開きとして扱う（order_panels 参照）。
     横位置が COLUMN_BAND 以内の吹き出しは同じ縦の列とみなして上から順にする。
     座標のない行は元の順序を保つ。
     """
     if panels:
-        ordered = order_panels(panels)
+        ordered = order_panels(panels, spread=spread)
         renumber = {q.id: i + 1 for i, q in enumerate(ordered)}
         lines = [l.model_copy(update={"panel": renumber.get(l.panel, l.panel)}) for l in lines]
     result: list[Line] = []
