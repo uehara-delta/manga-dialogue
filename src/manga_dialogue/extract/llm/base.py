@@ -63,6 +63,7 @@ class VisionModel(ABC):
                 last_error = e
                 transient_failures += 1
                 time.sleep(TRANSIENT_BACKOFF_SECONDS * transient_failures)
+        detail = str(last_error).splitlines()[0][:200] if last_error else ""
         raise RuntimeError(
-            f"再試行しても処理できませんでした (解析失敗 {parse_failures} 回, API エラー {transient_failures} 回)"
+            f"再試行しても処理できませんでした (解析失敗 {parse_failures} 回, API エラー {transient_failures} 回): {detail}"
         ) from last_error

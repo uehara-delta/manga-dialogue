@@ -12,6 +12,7 @@ DEFAULT_MODEL = "claude-opus-5"
 MAX_LONG_EDGE = 2576
 MAX_IMAGE_BYTES = 4_500_000
 SPREAD_ASPECT = 1.15
+EXTRACT_MAX_TOKENS = 32000
 
 
 class ExtractionFailed(RuntimeError):
@@ -59,7 +60,7 @@ def extract_page(
     """
     parts = [load_image_part(image_path), TextPart(build_user_prompt(book.to_prompt_text(), final_book=final_book))]
     try:
-        extraction = llm.complete(SYSTEM_PROMPT, parts, PageExtraction, max_tokens=8000)
+        extraction = llm.complete(SYSTEM_PROMPT, parts, PageExtraction, max_tokens=EXTRACT_MAX_TOKENS)
     except RuntimeError as e:
         raise ExtractionFailed(f"{image_path.name}: {e}") from e
     extraction.lines = normalize_text(

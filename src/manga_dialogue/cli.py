@@ -144,6 +144,16 @@ def _process_page(
     return result
 
 
+def _abort(error: Exception, **data) -> None:
+    """課金切れ・認証エラーなど、続行しても回復しない失敗で処理全体を止める"""
+    reporter.error(
+        f"中断: {type(error).__name__}: {str(error).splitlines()[0][:300]}\n--resume を付けて再実行すると続きから処理できます",
+        error_type=type(error).__name__,
+        **data,
+    )
+    raise typer.Exit(2)
+
+
 def _report_failures(failed: list[str]) -> None:
     if not failed:
         return
@@ -188,6 +198,8 @@ def extract(
         except ExtractionFailed as e:
             reporter.event("page_failed", f"失敗（スキップ）: {e}", volume=volume, page=int(image.stem), message=str(e))
             failed.append(image.name)
+        except Exception as e:
+            _abort(e, done=len(images) - len(failed), failed=failed)
 
     reporter.event("done", f"完了: {work.output_dir} / 台帳 {len(book.characters)} 名", characters=len(book.characters), failed=failed)
     _report_failures(failed)
@@ -260,6 +272,8 @@ def repass(
         except ExtractionFailed as e:
             reporter.event("page_failed", f"失敗（スキップ）: {e}", volume=vol.volume, page=int(image.stem), message=str(e))
             failed.append(f"v{vol.volume:02d}/{image.name}")
+        except Exception as e:
+            _abort(e, failed=failed)
 
     reporter.event("done", f"完了: {len(targets) - len(failed)} ページ再抽出", processed=len(targets) - len(failed), failed=failed)
     _report_failures(failed)
