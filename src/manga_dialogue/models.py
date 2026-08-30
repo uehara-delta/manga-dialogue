@@ -24,6 +24,7 @@ class Line(BaseModel):
     )
     x: float | None = Field(default=None, ge=0.0, le=1.0, description="吹き出し中心の横位置。画像左端 0.0〜右端 1.0")
     y: float | None = Field(default=None, ge=0.0, le=1.0, description="吹き出し中心の縦位置。画像上端 0.0〜下端 1.0")
+    manual: bool = Field(default=False, description="人手または fix で修正済み。再抽出で上書きしない")
 
 
 class Rename(BaseModel):
@@ -197,6 +198,10 @@ class PageResult(BaseModel):
     new_characters: list[Character]
     renames: list[Rename] = Field(default_factory=list)
     repassed: bool = False
+    manual: bool = Field(default=False, description="ページ全体を人手で確定済み。再抽出で上書きしない")
 
     def needs_repass(self, min_confidence: float) -> bool:
         return any(l.speaker == "不明" or l.confidence < min_confidence for l in self.lines)
+
+    def is_locked(self) -> bool:
+        return self.manual or any(l.manual for l in self.lines)

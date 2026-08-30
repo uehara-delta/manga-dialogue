@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import anthropic
@@ -7,11 +8,43 @@ import typer
 from manga_dialogue.extract.characters import CharacterBook
 from manga_dialogue.extract.consolidate import propose_consolidation
 from manga_dialogue.extract.extractor import DEFAULT_MODEL, ExtractionFailed, extract_page
+from manga_dialogue.extract.fix import apply_changes, load_pages, propose_fix
 from manga_dialogue.extract.renames import apply_rename, record_pending
 from manga_dialogue.models import PageResult
+from manga_dialogue.output.export import FORMATS, export
 from manga_dialogue.workspace import DEFAULT_ROOT, Work
 
 app = typer.Typer(help="Kindle の漫画画面をキャプチャし、セリフを文字起こしする")
+
+
+class Reporter:
+    """人間向けの表示と、GUI 向けの JSON Lines 出力を切り替える"""
+
+    def __init__(self, as_json: bool) -> None:
+        self.as_json = as_json
+
+    def event(self, event: str, message: str = "", **data) -> None:
+        if self.as_json:
+            sys.stdout.write(json.dumps({"event": event, **data}, ensure_ascii=False) + "\n")
+            sys.stdout.flush()
+        elif message:
+            typer.echo(message)
+
+    def error(self, message: str, **data) -> None:
+        if self.as_json:
+            sys.stdout.write(json.dumps({"event": "error", "message": message, **data}, ensure_ascii=False) + "\n")
+            sys.stdout.flush()
+        else:
+            typer.echo(message, err=True)
+
+
+reporter = Reporter(False)
+
+
+@app.callback()
+def main(json_output: bool = typer.Option(False, "--json", help="進捗と結果を JSON Lines で出力する")) -> None:
+    global reporter
+    reporter = Reporter(json_output)
 
 
 @app.command()
@@ -29,16 +62,20 @@ def capture(
 
     work = Work(title, root, volume)
     driver = get_driver()
-    typer.echo(f"キャプチャ開始: {work.captures_dir}")
-    saved = driver.run(
-        work,
-        max_pages=max_pages,
-        delay=delay,
-        key=key,
-        start=start,
-        on_page=lambda p: typer.echo(f"  page {p:04d}"),
-    )
-    typer.echo(f"完了: {saved} ページ保存")
+    reporter.event("start", f"キャプチャ開始: {work.captures_dir}", dir=str(work.captures_dir))
+    try:
+        saved = driver.run(
+            work,
+            max_pages=max_pages,
+            delay=delay,
+            key=key,
+            start=start,
+            on_page=lambda p: reporter.event("page", f"  page {p:04d}", volume=volume, page=p),
+        )
+    except RuntimeError as e:
+        reporter.error(str(e))
+        raise typer.Exit(1)
+    reporter.event("done", f"完了: {saved} ページ保存", saved=saved)
 
 
 def _process_page(
@@ -56,7 +93,6 @@ def _process_page(
     未満なら pending_renames.jsonl に記録するだけにする。
     """
     page = int(image.stem)
-    typer.echo(f"page {page:04d} ... ", nl=False)
     extraction = extract_page(client, image, book, model=model, final_book=final_book)
     added = book.merge(extraction.new_characters)
     book.save()
@@ -72,27 +108,42 @@ def _process_page(
     work.output_path(page).write_text(
         json.dumps(result.model_dump(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    notes = [f"{len(extraction.lines)} lines"]
-    if added:
-        notes.append(f"新キャラ: {', '.join(c.name for c in added)}")
+    applied: list[dict] = []
+    pending: list[dict] = []
     for r in extraction.renames:
         if book.find(r.from_name) is None:
             continue
         if r.confidence >= rename_threshold:
             n = apply_rename(work, book, r.from_name, r.to_name)
-            notes.append(f"改名: {r.from_name} → {r.to_name} ({n} 件置換)")
+            applied.append({"from": r.from_name, "to": r.to_name, "replaced": n})
         else:
             record_pending(work, page, r)
-            notes.append(f"改名候補(保留): {r.from_name} → {r.to_name} ({r.confidence:.2f})")
-    typer.echo(", ".join(notes))
+            pending.append({"from": r.from_name, "to": r.to_name, "confidence": r.confidence})
+    notes = [f"{len(extraction.lines)} lines"]
+    if added:
+        notes.append(f"新キャラ: {', '.join(c.name for c in added)}")
+    notes += [f"改名: {a['from']} → {a['to']} ({a['replaced']} 件置換)" for a in applied]
+    notes += [f"改名候補(保留): {p['from']} → {p['to']} ({p['confidence']:.2f})" for p in pending]
+    reporter.event(
+        "page",
+        f"page {page:04d} ... " + ", ".join(notes),
+        volume=work.volume,
+        page=page,
+        lines=len(extraction.lines),
+        new_characters=[c.name for c in added],
+        renames_applied=applied,
+        renames_pending=pending,
+    )
     return result
 
 
 def _report_failures(failed: list[str]) -> None:
     if not failed:
         return
-    typer.echo(f"失敗したページ ({len(failed)}): {', '.join(failed)}", err=True)
-    typer.echo("--resume を付けて再実行すると失敗ページだけ再処理されます", err=True)
+    reporter.error(
+        f"失敗したページ ({len(failed)}): {', '.join(failed)}\n--resume を付けて再実行すると失敗ページだけ再処理されます",
+        failed=failed,
+    )
     raise typer.Exit(1)
 
 
@@ -109,12 +160,13 @@ def extract(
     work = Work(title, root, volume)
     images = work.capture_images()
     if not images:
-        typer.echo(f"画像がありません: {work.captures_dir}", err=True)
+        reporter.error(f"画像がありません: {work.captures_dir}")
         raise typer.Exit(1)
 
     work.ensure_dirs()
     book = CharacterBook.load(work.characters_path)
     client = anthropic.Anthropic()
+    reporter.event("start", total=len(images), volume=volume)
 
     failed: list[str] = []
     for image in images:
@@ -123,10 +175,10 @@ def extract(
         try:
             _process_page(client, work, image, book, model, rename_threshold)
         except ExtractionFailed as e:
-            typer.echo(f"失敗（スキップ）: {e}", err=True)
+            reporter.event("page_failed", f"失敗（スキップ）: {e}", volume=volume, page=int(image.stem), message=str(e))
             failed.append(image.name)
 
-    typer.echo(f"完了: {work.output_dir} / 台帳 {len(book.characters)} 名")
+    reporter.event("done", f"完了: {work.output_dir} / 台帳 {len(book.characters)} 名", characters=len(book.characters), failed=failed)
     _report_failures(failed)
 
 
@@ -137,6 +189,7 @@ def repass(
     min_confidence: float = typer.Option(0.5, help="この値未満の confidence を含むページを再抽出"),
     all_pages: bool = typer.Option(False, "--all", help="条件に関係なく全ページを再抽出"),
     pages: list[int] = typer.Option([], "--page", help="指定ページだけ再抽出（複数指定可）"),
+    force: bool = typer.Option(False, help="手動修正済み（manual）のページも再抽出する"),
     dry_run: bool = typer.Option(False, help="対象ページの一覧だけ表示して終了"),
     rename_threshold: float = typer.Option(0.8, help="この confidence 以上の改名指示を自動適用"),
     volume: int | None = typer.Option(None, help="巻番号（省略時は全巻）"),
@@ -145,33 +198,46 @@ def repass(
     """処理済み範囲の台帳を使い、「不明」や低 confidence を含むページだけ再抽出する
 
     extract を最後まで通した後に実行する。対象ページの出力 JSON は上書きされる。
+    手動修正済みのページは --force を付けない限りスキップする。
     """
     work = Work(title, root)
     book = CharacterBook.load(work.characters_path)
     if not book.characters:
-        typer.echo(f"台帳が空です。先に extract を実行してください: {work.characters_path}", err=True)
+        reporter.error(f"台帳が空です。先に extract を実行してください: {work.characters_path}")
         raise typer.Exit(1)
 
     volumes = [Work(title, root, volume)] if volume is not None else work.all_volumes()
     targets: list[tuple[Work, Path]] = []
+    skipped_manual: list[str] = []
     for vol in volumes:
         for image in vol.capture_images():
             out = vol.output_path(int(image.stem))
             if not out.exists():
                 continue
             page = int(image.stem)
-            if pages:
-                if page in pages:
-                    targets.append((vol, image))
-                continue
             result = PageResult.model_validate_json(out.read_text(encoding="utf-8"))
-            if all_pages or result.needs_repass(min_confidence):
-                targets.append((vol, image))
+            if pages:
+                selected = page in pages
+            else:
+                selected = all_pages or result.needs_repass(min_confidence)
+            if not selected:
+                continue
+            if result.is_locked() and not force:
+                skipped_manual.append(f"v{vol.volume:02d}/{image.name}")
+                continue
+            targets.append((vol, image))
 
-    typer.echo(f"再抽出対象: {len(targets)} ページ（台帳 {len(book.characters)} 名）")
+    reporter.event(
+        "start",
+        f"再抽出対象: {len(targets)} ページ（台帳 {len(book.characters)} 名）"
+        + (f"、手動修正済みのためスキップ: {len(skipped_manual)}" if skipped_manual else ""),
+        total=len(targets),
+        skipped_manual=skipped_manual,
+        targets=[{"volume": v.volume, "page": int(t.stem)} for v, t in targets],
+    )
     if dry_run or not targets:
         for vol, t in targets:
-            typer.echo(f"  v{vol.volume:02d} {t.name}")
+            reporter.event("target", f"  v{vol.volume:02d} {t.name}", volume=vol.volume, page=int(t.stem))
         return
 
     client = anthropic.Anthropic()
@@ -180,10 +246,10 @@ def repass(
         try:
             _process_page(client, vol, image, book, model, rename_threshold, final_book=True)
         except ExtractionFailed as e:
-            typer.echo(f"失敗（スキップ）: {e}", err=True)
+            reporter.event("page_failed", f"失敗（スキップ）: {e}", volume=vol.volume, page=int(image.stem), message=str(e))
             failed.append(f"v{vol.volume:02d}/{image.name}")
 
-    typer.echo(f"完了: {len(targets) - len(failed)} ページ再抽出")
+    reporter.event("done", f"完了: {len(targets) - len(failed)} ページ再抽出", processed=len(targets) - len(failed), failed=failed)
     _report_failures(failed)
 
 
@@ -202,28 +268,31 @@ def consolidate(
     work = Work(title, root)
     book = CharacterBook.load(work.characters_path)
     if not book.characters or not any(v.output_files() for v in work.all_volumes()):
-        typer.echo("台帳または出力がありません。先に extract を実行してください", err=True)
+        reporter.error("台帳または出力がありません。先に extract を実行してください")
         raise typer.Exit(1)
 
     client = anthropic.Anthropic()
     plan = propose_consolidation(client, book, work, model)
-    typer.echo(f"提案: {len(plan.renames)} 件")
+    reporter.event("start", f"提案: {len(plan.renames)} 件", total=len(plan.renames))
     applied = 0
     for r in plan.renames:
-        mark = "適用" if r.confidence >= rename_threshold else "保留"
-        if dry_run:
-            mark = "候補"
-        typer.echo(f"  [{mark} {r.confidence:.2f}] {r.from_name} → {r.to_name}\n      {r.reason}")
-        if dry_run or book.find(r.from_name) is None:
-            continue
-        if r.confidence >= rename_threshold:
-            n = apply_rename(work, book, r.from_name, r.to_name)
-            typer.echo(f"      → {n} 件置換")
+        known = book.find(r.from_name) is not None
+        will_apply = not dry_run and known and r.confidence >= rename_threshold
+        mark = "候補" if dry_run else ("適用" if will_apply else "保留")
+        replaced = None
+        if will_apply:
+            replaced = apply_rename(work, book, r.from_name, r.to_name)
             applied += 1
-        else:
+        elif not dry_run and known:
             record_pending(work, 0, r)
-    if not dry_run:
-        typer.echo(f"完了: {applied} 件適用 / 台帳 {len(book.characters)} 名")
+        text = f"  [{mark} {r.confidence:.2f}] {r.from_name} → {r.to_name}\n      {r.reason}"
+        if replaced is not None:
+            text += f"\n      → {replaced} 件置換"
+        reporter.event(
+            "proposal", text, status=mark, from_name=r.from_name, to_name=r.to_name,
+            confidence=r.confidence, reason=r.reason, replaced=replaced,
+        )
+    reporter.event("done", "" if dry_run else f"完了: {applied} 件適用 / 台帳 {len(book.characters)} 名", applied=applied, characters=len(book.characters))
 
 
 @app.command()
@@ -237,10 +306,74 @@ def rename(
     work = Work(title, root)
     book = CharacterBook.load(work.characters_path)
     if book.find(from_name) is None:
-        typer.echo(f"台帳に見つかりません: {from_name}", err=True)
+        reporter.error(f"台帳に見つかりません: {from_name}")
         raise typer.Exit(1)
     n = apply_rename(work, book, from_name, to_name)
-    typer.echo(f"改名: {from_name} → {to_name} / 出力 {n} 件置換 / 台帳 {len(book.characters)} 名")
+    reporter.event("done", f"改名: {from_name} → {to_name} / 出力 {n} 件置換 / 台帳 {len(book.characters)} 名", replaced=n, characters=len(book.characters))
+
+
+@app.command("export")
+def export_cmd(
+    title: str = typer.Argument(help="作品名"),
+    fmt: str = typer.Option("csv", "--format", help="csv / tsv / markdown"),
+    dest: Path | None = typer.Option(None, "--out", help="出力先ファイル（省略時は works/<作品名>/ 直下）"),
+    volume: int | None = typer.Option(None, help="巻番号（省略時は全巻）"),
+    root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
+) -> None:
+    """抽出結果を CSV / TSV / Markdown に書き出す"""
+    if fmt not in FORMATS:
+        reporter.error(f"未対応の形式: {fmt}（csv / tsv / markdown）")
+        raise typer.Exit(1)
+    work = Work(title, root)
+    path, rows = export(work, fmt, dest, volume)
+    reporter.event("done", f"書き出し: {path} ({rows} 行)", path=str(path), rows=rows)
+
+
+@app.command()
+def fix(
+    title: str = typer.Argument(help="作品名"),
+    instruction: str = typer.Option(..., "--instruction", "-i", help="修正の指示文"),
+    volume: int | None = typer.Option(None, help="巻番号（省略時は全巻）"),
+    pages: list[int] = typer.Option([], "--page", help="対象ページ（複数指定可。省略時は範囲内の全ページ）"),
+    with_images: bool = typer.Option(False, help="対象ページの画像も添付する（費用増）"),
+    apply: bool = typer.Option(False, help="変更案を適用する（省略時は提案のみ）"),
+    model: str = typer.Option(DEFAULT_MODEL, help="使用するモデル ID"),
+    root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
+) -> None:
+    """指示文に基づいて抽出結果の一括修正案を作り、必要なら適用する
+
+    適用した行には manual が付き、以降の repass で上書きされなくなる。
+    """
+    work = Work(title, root)
+    book = CharacterBook.load(work.characters_path)
+    targets = load_pages(work, volume, pages)
+    if not targets:
+        reporter.error("対象ページがありません")
+        raise typer.Exit(1)
+
+    client = anthropic.Anthropic()
+    plan = propose_fix(client, book, targets, instruction, model=model, with_images=with_images)
+    reporter.event("start", f"変更案: {len(plan.changes)} 件（対象 {len(targets)} ページ）", total=len(plan.changes), pages=len(targets))
+    by_page = {(v.volume, r.page): r for v, r in targets}
+    for c in plan.changes:
+        result = by_page.get((c.volume, c.page))
+        before = result.lines[c.index] if result and 0 <= c.index < len(result.lines) else None
+        desc = f"  v{c.volume:02d} p{c.page:03d} #{c.index}"
+        if before:
+            desc += f" 「{before.text[:20]}」"
+        for field in ("speaker", "text", "panel"):
+            new = getattr(c, field)
+            if new is not None:
+                old = getattr(before, field) if before else "?"
+                desc += f"\n      {field}: {old} → {new}"
+        desc += f"\n      {c.reason}"
+        reporter.event(
+            "change", desc, volume=c.volume, page=c.page, index=c.index,
+            before=before.model_dump() if before else None,
+            speaker=c.speaker, text=c.text, panel=c.panel, reason=c.reason,
+        )
+    applied = apply_changes(work, plan.changes) if apply else 0
+    reporter.event("done", f"完了: {applied} 件適用" if apply else "（--apply で適用）", applied=applied, proposed=len(plan.changes))
 
 
 if __name__ == "__main__":

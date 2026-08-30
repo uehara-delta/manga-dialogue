@@ -209,6 +209,24 @@ uv run manga-dialogue consolidate "作品名"             # 閾値以上を適�
 `extract` / `repass` の実行中には使わないでください（台帳が上書きされます）。
 統合後に `repass` を再実行すると、統合された名前で再抽出されます。
 
+### AI による一括修正（fix）
+
+「『うう』の話者をユルの母にして」のような指示文で、範囲内のセリフの修正案を LLM に作らせます。
+既定では提案を表示するだけで、`--apply` を付けると適用します。適用した行には `manual` が付き、
+以降の `repass` で上書きされません。
+
+```bash
+uv run manga-dialogue fix "作品名" --volume 1 --page 5 -i "「うう」の話者を「主人公の母（仮）」にする"
+uv run manga-dialogue fix "作品名" --volume 1 -i "『不明』のうち尻尾が明確なものを再判定" --with-images --apply
+```
+
+| オプション | 既定値 | 説明 |
+|---|---|---|
+| `-i` / `--instruction` | 必須 | 修正の指示文 |
+| `--volume` / `--page` | 全巻 / 全ページ | 対象範囲 |
+| `--with-images` | off | 対象ページの画像も送る（話者の再判定などに。費用増） |
+| `--apply` | off | 変更案を適用する |
+
 ### 手動での改名（rename）
 
 仮名や誤った名前を手で直したいときは `rename` を使います。台帳を更新し、出力済み JSON の
@@ -217,6 +235,38 @@ speaker（「〜（心の声）」も含む）を置き換えます。API は呼
 ```bash
 uv run manga-dialogue rename "作品名" "主人公の母（仮）" "花子"
 ```
+
+### エクスポート（export）
+
+```bash
+uv run manga-dialogue export "作品名"                    # works/<作品名>/<作品名>.csv
+uv run manga-dialogue export "作品名" --format tsv --volume 1
+uv run manga-dialogue export "作品名" --format markdown --out ~/Desktop/dialogue.md
+```
+
+列: `volume, page, panel, speaker, text, confidence, basis, manual`。Markdown はページごとの見出し付きです。
+
+### 手動修正の保護（manual）
+
+出力 JSON の行に `"manual": true`（またはページに `"manual": true`）を付けると、そのページは
+`repass` の対象から外れます（`--force` で含められます）。`fix --apply` で変更した行にも自動で付きます。
+`rename` は manual な行にも適用されます。
+
+### GUI 連携（--json）
+
+すべてのコマンドは `--json` を付けると、人間向けの表示の代わりに JSON Lines を stdout に出します。
+GUI などから子プロセスとして呼び出す用途向けです。
+
+```bash
+uv run manga-dialogue --json extract "作品名" --volume 1
+{"event": "start", "total": 206, "volume": 1}
+{"event": "page", "volume": 1, "page": 1, "lines": 5, "new_characters": [], "renames_applied": [], "renames_pending": []}
+...
+{"event": "done", "characters": 39, "failed": []}
+```
+
+主なイベント: `start` / `page` / `page_failed` / `target`（repass の dry-run） / `proposal`（consolidate） /
+`change`（fix） / `done` / `error`。失敗時は `error` を出して終了コード 1 になります。
 
 ### 出力形式
 
@@ -228,22 +278,25 @@ uv run manga-dialogue rename "作品名" "主人公の母（仮）" "花子"
   "page": 1,
   "image": "0001.png",
   "lines": [
-    {"panel": 1, "speaker": "ナレーション", "text": "……", "confidence": 1.0, "x": 0.8, "y": 0.1},
-    {"panel": 2, "speaker": "太郎", "text": "……", "confidence": 0.9, "x": 0.3, "y": 0.5}
+    {"panel": 1, "speaker": "ナレーション", "text": "……", "confidence": 1.0, "basis": "unknown", "x": 0.8, "y": 0.1, "manual": false},
+    {"panel": 2, "speaker": "太郎", "text": "……", "confidence": 0.9, "basis": "tail", "x": 0.3, "y": 0.5, "manual": false}
   ],
   "new_characters": [
     {"name": "太郎", "aliases": [], "appearance": "黒髪短髪、学生服"}
   ],
   "renames": [],
-  "repassed": false
+  "repassed": false,
+  "manual": false
 }
 ```
 
 - `panel`: ページ内のコマ番号（右→左、上→下）
 - `speaker`: 話者。ナレーションは `ナレーション`、心の声は `太郎（心の声）`、特定できない場合は `不明`
 - `confidence`: 話者特定の確信度（0〜1）
+- `basis`: 話者を決めた根拠。`tail`（吹き出しの尻尾）/ `context`（文脈推定。confidence は 0.6 以下）/ `unknown`
 - `x`, `y`: 吹き出し中心の位置（画像左上が 0,0、右下が 1,1）。`lines` はコマ番号順、
   同じコマ内は座標から右→左・上→下に並べ替え済み
+- `manual`: 手動または `fix` で修正済み。`repass` で上書きされない
 
 ### キャラ台帳の手動編集
 
