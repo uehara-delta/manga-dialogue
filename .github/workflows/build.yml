@@ -1,0 +1,111 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  engine:
+    name: engine (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --group dev
+      - name: Build engine with PyInstaller
+        run: uv run --group dev pyinstaller packaging/engine.spec --noconfirm --distpath dist --workpath build/pyinstaller
+      - name: Smoke test
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then bin=dist/manga-dialogue-engine/manga-dialogue-engine.exe; else bin=dist/manga-dialogue-engine/manga-dialogue-engine; fi
+          "$bin" info --root works
+          "$bin" --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-${{ runner.os }}
+          path: dist/manga-dialogue-engine
+          if-no-files-found: error
+
+  gui:
+    name: gui (${{ matrix.os }})
+    needs: engine
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read Flutter version from gui/.fvmrc
+        id: fvm
+        shell: bash
+        run: echo "version=$(python3 -c "import json;print(json.load(open('gui/.fvmrc'))['flutter'])")" >> "$GITHUB_OUTPUT"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.fvm.outputs.version }}
+          channel: stable
+          cache: true
+      - name: Enable desktop
+        working-directory: gui
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then flutter config --enable-windows-desktop; else flutter config --enable-macos-desktop; fi
+      - name: Analyze
+        working-directory: gui
+        run: flutter analyze
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        working-directory: gui
+        run: flutter build macos --release
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        working-directory: gui
+        run: flutter build windows --release
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine-${{ runner.os }}
+          path: dist/manga-dialogue-engine
+      - name: Bundle engine (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          chmod +x dist/manga-dialogue-engine/manga-dialogue-engine
+          scripts/bundle_engine.sh gui/build/macos/Build/Products/Release/manga_dialogue_gui.app
+          ditto -c -k --keepParent gui/build/macos/Build/Products/Release/manga_dialogue_gui.app manga-dialogue-macos.zip
+      - name: Bundle engine (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          scripts/bundle_engine.sh gui/build/windows/x64/runner/Release
+          cd gui/build/windows/x64/runner && 7z a ../../../../../manga-dialogue-windows.zip Release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manga-dialogue-${{ runner.os }}
+          path: manga-dialogue-*.zip
+          if-no-files-found: error
+
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: gui
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: manga-dialogue-*
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: manga-dialogue-*.zip
+          generate_release_notes: true

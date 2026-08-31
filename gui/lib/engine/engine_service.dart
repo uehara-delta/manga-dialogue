@@ -117,7 +117,7 @@ class EngineService {
       final process = await Process.start(
         executable,
         fullArgs,
-        workingDirectory: config.workingDir,
+        workingDirectory: config.workingDir.isEmpty ? null : config.workingDir,
         environment: config.environment,
         includeParentEnvironment: true,
       );
@@ -155,7 +155,7 @@ class EngineService {
       final result = await Process.run(
         parts.first,
         [...parts.skip(1), '--json', ...args, '--root', config.worksRoot],
-        workingDirectory: config.workingDir,
+        workingDirectory: config.workingDir.isEmpty ? null : config.workingDir,
         environment: config.environment,
         includeParentEnvironment: true,
       ).timeout(const Duration(minutes: 5));
@@ -180,7 +180,7 @@ class EngineService {
       final result = await Process.run(
         parts.first,
         [...parts.skip(1), 'info', '--root', config.worksRoot],
-        workingDirectory: config.workingDir,
+        workingDirectory: config.workingDir.isEmpty ? null : config.workingDir,
         environment: config.environment,
         includeParentEnvironment: true,
       ).timeout(const Duration(seconds: 60));

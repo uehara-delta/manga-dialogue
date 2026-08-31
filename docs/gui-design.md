@@ -180,9 +180,10 @@ gui/                          # Flutter プロジェクト（リポジトリ内�
 
 ## 7. 配布
 
-- エンジン: GitHub Actions（macos-latest / windows-latest）で PyInstaller ビルド。成果物を Release に添付
-- GUI: `flutter build macos` / `flutter build windows`。ビルド時にエンジンの成果物を `Resources/engine/`（Mac）/ `engine/`（Windows）に配置
-- 開発時は設定画面でリポジトリの `uv run manga-dialogue` を指定すればエンジンの同梱は不要
+- エンジン: `packaging/engine.spec`（PyInstaller、onedir）。GitHub Actions（macos-latest / windows-latest）でビルドし、`info` で疎通確認
+- GUI: `flutter build macos` / `flutter build windows`（Release）。`scripts/bundle_engine.sh` がエンジンを `Contents/Resources/engine/`（Mac）/ `engine/`（Windows）にコピー
+- GUI の `EngineLocator` が同梱エンジンを検出すると既定の起動コマンドにする。開発時は設定でリポジトリの `uv run --env-file .env manga-dialogue` を指定
+- `v*` タグで両 OS の zip を Release に添付（`.github/workflows/build.yml`）。署名・公証は未対応
 
 ## 8. マイルストーン
 

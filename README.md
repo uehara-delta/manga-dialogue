@@ -407,6 +407,8 @@ Windows では fvm を https://fvm.app/documentation/getting-started/installatio
 設定画面（右上の歯車）でエンジンの起動コマンドと作業ディレクトリを指定し、「接続確認」で
 `manga-dialogue info` の応答（バージョン、既定モデル、API キーの有無）を確認できます。
 開発中の既定は `uv run --env-file .env manga-dialogue`（作業ディレクトリ = このリポジトリ）です。
+API キーは設定画面の「API キー」に入力するとエンジンに環境変数として渡されます（配布版はこちらを使います。
+`~/.manga_dialogue_gui.json` に平文で保存される点に注意）。空欄なら `.env` や環境変数の値が使われます。
 
 エンジンの実行（抽出・再抽出・エクスポート・台帳の整理・AI 一括修正）はジョブとして右上のジョブ画面に並び、
 進捗・トークン使用量・ログの確認とキャンセルができます。実行中の run は `.lock` により読み取り専用になります。
@@ -421,6 +423,28 @@ Windows では fvm を https://fvm.app/documentation/getting-started/installatio
 ```bash
 open --env "MD_INITIAL_ROUTE=/edit/作品名/gemini/1?page=6" build/macos/Build/Products/Debug/manga_dialogue_gui.app
 ```
+
+### 配布用ビルド
+
+エンジン（Python）は PyInstaller で単一フォルダにまとめ、Flutter アプリに同梱します。
+GUI は起動時に同梱エンジン（macOS: `<App>.app/Contents/Resources/engine/`、Windows: `<exe のフォルダ>/engine/`）を
+見つけるとそれを既定の起動コマンドにします。
+
+```bash
+# エンジン
+uv sync --group dev
+uv run --group dev pyinstaller packaging/engine.spec --noconfirm --distpath dist --workpath build/pyinstaller
+./dist/manga-dialogue-engine/manga-dialogue-engine info --root works
+
+# GUI（Release）にエンジンを同梱
+cd gui && fvm flutter build macos --release && cd ..
+scripts/bundle_engine.sh gui/build/macos/Build/Products/Release/manga_dialogue_gui.app
+```
+
+GitHub Actions（`.github/workflows/build.yml`）が macOS / Windows の両方でエンジンと GUI をビルドし、
+同梱済みの zip を成果物として保存します。`v*` タグを push すると Release に添付されます。
+署名・公証は行っていないので、macOS では初回起動時に右クリック →「開く」が必要です。
+配布版の既定の `works/` はアプリと同じ階層の `works/` です。
 
 ### 補足
 

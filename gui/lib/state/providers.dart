@@ -9,7 +9,7 @@ class SettingsNotifier extends Notifier<Settings> {
   Settings build() => Settings.load();
 
   void update(void Function(Settings s) edit) {
-    final s = Settings(worksRoot: state.worksRoot, engineCommand: state.engineCommand, engineWorkingDir: state.engineWorkingDir);
+    final s = Settings(worksRoot: state.worksRoot, engineCommand: state.engineCommand, engineWorkingDir: state.engineWorkingDir, apiKeys: Map.of(state.apiKeys));
     edit(s);
     s.save();
     state = s;

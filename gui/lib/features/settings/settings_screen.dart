@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../engine/engine_locator.dart';
 import '../../state/engine_providers.dart';
 import '../../state/providers.dart';
 
@@ -15,6 +16,8 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late final _command = TextEditingController(text: ref.read(settingsProvider).engineCommand);
   late final _workingDir = TextEditingController(text: ref.read(settingsProvider).engineWorkingDir ?? '');
+  late final _anthropicKey = TextEditingController(text: ref.read(settingsProvider).apiKeys['ANTHROPIC_API_KEY'] ?? '');
+  late final _geminiKey = TextEditingController(text: ref.read(settingsProvider).apiKeys['GEMINI_API_KEY'] ?? '');
   Map<String, dynamic>? _info;
   bool _checking = false;
 
@@ -69,7 +72,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
             style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 24),
+          Text('API キー', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          const Text('エンジンに環境変数として渡します。空欄なら .env や環境変数の値が使われます。この設定ファイル（~/.manga_dialogue_gui.json）に平文で保存されます。', style: TextStyle(fontSize: 12, color: Colors.grey)),
+          const SizedBox(height: 8),
+          TextField(controller: _geminiKey, obscureText: true, decoration: const InputDecoration(labelText: 'GEMINI_API_KEY')),
+          const SizedBox(height: 8),
+          TextField(controller: _anthropicKey, obscureText: true, decoration: const InputDecoration(labelText: 'ANTHROPIC_API_KEY')),
+          const SizedBox(height: 16),
           Row(
             children: [
               FilledButton(
@@ -77,12 +88,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ref.read(settingsProvider.notifier).update((s) {
                     s.engineCommand = _command.text.trim();
                     s.engineWorkingDir = _workingDir.text.trim().isEmpty ? null : _workingDir.text.trim();
+                    s.apiKeys = {'GEMINI_API_KEY': _geminiKey.text.trim(), 'ANTHROPIC_API_KEY': _anthropicKey.text.trim()};
                   });
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('保存しました')));
                 },
                 child: const Text('保存'),
               ),
               const SizedBox(width: 12),
+              if (EngineLocator.bundledPath() != null)
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.inventory_2_outlined),
+                  label: const Text('同梱エンジンを使う'),
+                  onPressed: () => setState(() { _command.text = EngineLocator.bundledPath()!; _workingDir.text = ''; }),
+                ),
+              if (EngineLocator.bundledPath() != null) const SizedBox(width: 12),
               OutlinedButton.icon(
                 icon: _checking ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.link),
                 label: const Text('接続確認'),

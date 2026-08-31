@@ -9,8 +9,9 @@ final engineServiceProvider = Provider<EngineService>((ref) {
   final s = ref.watch(settingsProvider);
   final service = EngineService(EngineConfig(
     command: s.engineCommand,
-    workingDir: s.engineWorkingDir ?? '.',
+    workingDir: s.engineWorkingDir ?? '',
     worksRoot: s.worksRoot,
+    environment: s.environment,
   ));
   ref.onDispose(() {
     for (final j in service.jobs) {
