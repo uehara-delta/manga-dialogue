@@ -13,12 +13,15 @@ from manga_dialogue.extract.extractor import DEFAULT_MODEL, ExtractionFailed, ex
 from manga_dialogue.extract.llm import VisionModel, get_model
 from manga_dialogue.extract.llm import PROVIDER_PREFIXES
 from manga_dialogue.extract.fix import apply_changes, load_pages, propose_fix
+from manga_dialogue.extract.pending import PendingRename, PendingStore
 from manga_dialogue.extract.renames import apply_rename, record_pending
 from manga_dialogue.models import PageResult
 from manga_dialogue.output.export import FORMATS, export
 from manga_dialogue.workspace import DEFAULT_ROOT, DEFAULT_RUN, RunLocked, Work
 
 app = typer.Typer(help="Kindle の漫画画面をキャプチャし、セリフを文字起こしする")
+pending_app = typer.Typer(help="保留中の改名候補を一覧・承認・却下する")
+app.add_typer(pending_app, name="pending")
 
 
 class Reporter:
@@ -518,6 +521,89 @@ def fix(
         "done", f"完了: {applied} 件適用" if apply else "（--apply で適用）",
         applied=applied, proposed=len(plan.changes), usage=_usage_total(llm),
     )
+
+
+def _pending_event(item: PendingRename, book: CharacterBook, event: str = "pending") -> None:
+    """applicable: from_name がまだ台帳にあり、承認すれば rename が実行できる"""
+    applicable = book.find(item.from_name) is not None
+    note = "" if applicable else "  ※ 台帳に from_name がありません（既に統合済み）"
+    text = f"  [{item.status} {item.confidence:.2f}] {item.id}  {item.from_name} → {item.to_name}  ({len(item.sources)} 件の提案){note}\n      {item.reason}"
+    reporter.event(
+        event, text, id=item.id, from_name=item.from_name, to_name=item.to_name, status=item.status,
+        confidence=item.confidence, reason=item.reason, updated_at=item.updated_at, applicable=applicable,
+        sources=[{"volume": x.volume, "page": x.page, "confidence": x.confidence, "reason": x.reason, "at": x.at} for x in item.sources],
+    )
+
+
+@pending_app.command("list")
+def pending_list(
+    title: str = typer.Argument(help="作品名"),
+    all_items: bool = typer.Option(False, "--all", help="承認・却下済みも表示"),
+    run: str = typer.Option(DEFAULT_RUN, help="run 名"),
+    root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
+) -> None:
+    """保留中の改名候補を一覧表示する"""
+    work = Work(title, root, run=run)
+    store = PendingStore.load(work.pending_renames_path)
+    book = CharacterBook.load(work.characters_path)
+    items = store.list(None if all_items else "pending")
+    reporter.event("start", f"改名候補: {len(items)} 件", total=len(items))
+    for item in items:
+        _pending_event(item, book)
+    reporter.event("done", "", total=len(items))
+
+
+def _pending_set(title: str, run: str, root: Path, item_id: str, status: str) -> None:
+    work = Work(title, root, run=run)
+    store = PendingStore.load(work.pending_renames_path)
+    item = store.get(item_id)
+    if item is None:
+        reporter.error(f"候補が見つかりません: {item_id}")
+        raise typer.Exit(1)
+    replaced = 0
+    book = CharacterBook.load(work.characters_path)
+    if status == "approved" and book.find(item.from_name) is not None:
+        try:
+            with work.locked("pending approve"):
+                replaced = apply_rename(work, book, item.from_name, item.to_name)
+        except RunLocked as e:
+            _locked_exit(e)
+    item = store.set_status(item_id, status)
+    _pending_event(item, book, event="updated")
+    reporter.event("done", f"{item.from_name} → {item.to_name}: {status}" + (f" / 出力 {replaced} 件置換" if status == "approved" else ""), id=item_id, status=status, replaced=replaced)
+
+
+@pending_app.command("approve")
+def pending_approve(
+    title: str = typer.Argument(help="作品名"),
+    item_id: str = typer.Argument(help="候補の id"),
+    run: str = typer.Option(DEFAULT_RUN, help="run 名"),
+    root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
+) -> None:
+    """候補を承認し、rename を実行して台帳と出力に反映する"""
+    _pending_set(title, run, root, item_id, "approved")
+
+
+@pending_app.command("reject")
+def pending_reject(
+    title: str = typer.Argument(help="作品名"),
+    item_id: str = typer.Argument(help="候補の id"),
+    run: str = typer.Option(DEFAULT_RUN, help="run 名"),
+    root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
+) -> None:
+    """候補を却下する（同じ組が再提案されても保留に戻らない）"""
+    _pending_set(title, run, root, item_id, "rejected")
+
+
+@pending_app.command("reopen")
+def pending_reopen(
+    title: str = typer.Argument(help="作品名"),
+    item_id: str = typer.Argument(help="候補の id"),
+    run: str = typer.Option(DEFAULT_RUN, help="run 名"),
+    root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
+) -> None:
+    """却下した候補を保留に戻す"""
+    _pending_set(title, run, root, item_id, "pending")
 
 
 if __name__ == "__main__":

@@ -251,6 +251,22 @@ uv run manga-dialogue fix "作品名" --volume 1 -i "『不明』のうち尻尾
 | `--with-images` | off | 対象ページの画像も送る（話者の再判定などに。費用増） |
 | `--apply` | off | 変更案を適用する |
 
+### 保留中の改名候補（pending）
+
+extract / repass / consolidate が閾値未満で保留した改名候補は、run ごとの `pending_renames.jsonl` に
+候補単位（同じ from→to は 1 件に集約、根拠は履歴として保持）で記録されます。
+
+```bash
+uv run manga-dialogue pending list "作品名" --run gemini          # 保留中の一覧（--all で処理済みも）
+uv run manga-dialogue pending approve "作品名" <id> --run gemini  # 承認: rename を実行して台帳と出力に反映
+uv run manga-dialogue pending reject  "作品名" <id> --run gemini  # 却下: 同じ組が再提案されても保留に戻らない
+uv run manga-dialogue pending reopen  "作品名" <id> --run gemini  # 却下を取り消して保留に戻す
+```
+
+元の名前がすでに台帳から統合されている候補は `applicable: false` として表示され、承認しても
+置換は行わず状態だけ更新されます。GUI ではページ編集画面または台帳パネルの「改名候補のレビュー」から
+同じ操作ができます。
+
 ### 手動での改名（rename）
 
 仮名や誤った名前を手で直したいときは `rename` を使います。台帳を更新し、出力済み JSON の

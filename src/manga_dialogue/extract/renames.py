@@ -1,5 +1,4 @@
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 from manga_dialogue.extract.characters import CharacterBook
@@ -36,14 +35,9 @@ def _all_output_files(work: Work) -> list[Path]:
 
 
 def record_pending(work: Work, page: int, rename: Rename) -> Path:
-    """閾値未満で自動適用しなかった改名候補を追記する"""
-    path = work.pending_renames_path
-    entry = {
-        "volume": work.volume,
-        "page": page,
-        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        **rename.model_dump(),
-    }
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    return path
+    """閾値未満で自動適用しなかった改名候補を保留として記録する（同じ組は 1 件に集約）"""
+    from manga_dialogue.extract.pending import PendingStore
+
+    store = PendingStore.load(work.pending_renames_path)
+    store.upsert(rename, volume=work.volume, page=page)
+    return work.pending_renames_path

@@ -89,6 +89,14 @@ class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
               const VerticalDivider(),
               IconButton(tooltip: '元に戻す (⌘Z)', icon: const Icon(Icons.undo), onPressed: s.undo != null ? n.undo : null),
               IconButton(tooltip: 'キャラ台帳', icon: Icon(_showCharacters ? Icons.people : Icons.people_outline), onPressed: () => setState(() => _showCharacters = !_showCharacters)),
+              IconButton(
+                tooltip: '改名候補のレビュー',
+                icon: const Icon(Icons.rule),
+                onPressed: () async {
+                  await context.push('/review/${Uri.encodeComponent(widget.title)}/${widget.run}');
+                  if (mounted) ref.read(pageEditorProvider.notifier).open(s.ref);
+                },
+              ),
               const VerticalDivider(),
               IconButton(
                 tooltip: r == null ? 'このページを抽出' : (r.isLocked ? 'このページを再抽出（手動修正を上書き）' : 'このページを再抽出'),

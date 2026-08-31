@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../models/models.dart';
 import '../../state/providers.dart';
@@ -24,6 +25,11 @@ class CharactersPanel extends ConsumerWidget {
             children: [
               Text('キャラ台帳  ${characters.length} 名（仮名 ${characters.where((c) => c.isProvisional).length}）', style: const TextStyle(fontWeight: FontWeight.bold)),
               const Spacer(),
+              TextButton.icon(
+                icon: const Icon(Icons.rule, size: 16),
+                label: const Text('改名候補のレビュー'),
+                onPressed: () => context.push('/review/${Uri.encodeComponent(title)}/$run'),
+              ),
               TextButton.icon(
                 icon: const Icon(Icons.add, size: 16),
                 label: const Text('追加'),

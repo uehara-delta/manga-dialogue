@@ -147,6 +147,32 @@ class EngineService {
     if (job.isRunning) job.process?.kill(ProcessSignal.sigterm);
   }
 
+  /// 一覧系コマンドを実行して全イベントを返す（ジョブ一覧には載せない）。
+  /// エラー終了時は error イベントを含む
+  Future<List<EngineEvent>> query(List<String> args) async {
+    final parts = _split(config.command);
+    try {
+      final result = await Process.run(
+        parts.first,
+        [...parts.skip(1), '--json', ...args, '--root', config.worksRoot],
+        workingDirectory: config.workingDir,
+        environment: config.environment,
+        includeParentEnvironment: true,
+      ).timeout(const Duration(minutes: 5));
+      final events = <EngineEvent>[];
+      for (final line in const LineSplitter().convert(result.stdout as String)) {
+        if (!line.startsWith('{')) continue;
+        try { events.add(EngineEvent(jsonDecode(line) as Map<String, dynamic>)); } catch (_) {}
+      }
+      if (result.exitCode != 0 && !events.any((e) => e.type == 'error')) {
+        events.add(EngineEvent({'event': 'error', 'message': (result.stderr as String).trim().split('\n').lastOrNull ?? '終了コード ${result.exitCode}'}));
+      }
+      return events;
+    } catch (e) {
+      return [EngineEvent({'event': 'error', 'message': '$e'})];
+    }
+  }
+
   /// 疎通確認。info イベントを返す（失敗時は null）
   Future<Map<String, dynamic>?> info() async {
     final parts = _split(config.command);
