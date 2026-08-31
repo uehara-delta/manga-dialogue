@@ -7,6 +7,11 @@ from pathlib import Path
 
 import typer
 
+# Windows のコンソール既定（cp932 / cp1252）では日本語や JSON を出力できないため、常に UTF-8 にする
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 from manga_dialogue.extract.characters import CharacterBook
 from manga_dialogue.extract.consolidate import propose_consolidation
 from manga_dialogue.extract.extractor import DEFAULT_MODEL, ExtractionFailed, extract_page
