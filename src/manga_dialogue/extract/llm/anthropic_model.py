@@ -4,7 +4,7 @@ import anthropic
 import httpx2 as httpx
 from pydantic import ValidationError
 
-from manga_dialogue.extract.llm.base import ImagePart, ParseError, Part, Refused, TextPart, TransientError, VisionModel
+from manga_dialogue.extract.llm.base import ImagePart, ParseError, Part, Refused, TextPart, TransientError, Usage, VisionModel
 
 TRANSIENT_ERRORS = (
     anthropic.RateLimitError,
@@ -47,6 +47,8 @@ class AnthropicModel(VisionModel):
             raise
         except ValidationError as e:
             raise ParseError(str(e)) from e
+        if response.usage is not None:
+            self._record(Usage(response.usage.input_tokens or 0, response.usage.output_tokens or 0))
         if response.stop_reason == "refusal":
             raise Refused("モデルが処理を拒否しました")
         if response.parsed_output is None:

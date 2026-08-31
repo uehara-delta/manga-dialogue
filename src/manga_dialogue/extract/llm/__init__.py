@@ -1,4 +1,4 @@
-from manga_dialogue.extract.llm.base import ImagePart, ParseError, Part, Refused, TextPart, TransientError, VisionModel
+from manga_dialogue.extract.llm.base import ImagePart, ParseError, Part, Refused, TextPart, TransientError, Usage, VisionModel
 
 PROVIDER_PREFIXES = {
     "claude-": "anthropic",
@@ -26,6 +26,6 @@ def get_model(model: str) -> VisionModel:
 
 
 __all__ = [
-    "ImagePart", "ParseError", "Part", "Refused", "TextPart", "TransientError", "VisionModel",
+    "ImagePart", "ParseError", "Part", "Refused", "TextPart", "TransientError", "Usage", "VisionModel",
     "get_model", "provider_for",
 ]

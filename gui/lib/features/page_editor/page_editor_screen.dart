@@ -3,10 +3,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../engine/engine_service.dart';
 import '../../models/models.dart';
+import '../../state/engine_providers.dart';
 import '../../state/providers.dart';
 import '../../workspace/workspace.dart';
+import '../../widgets/app_actions.dart';
 import '../characters/characters_panel.dart';
+import '../jobs/run_dialogs.dart';
 import 'line_list.dart';
 import 'page_image.dart';
 
@@ -23,6 +27,27 @@ class PageEditorScreen extends ConsumerStatefulWidget {
 
 class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
   bool _showCharacters = false;
+
+  /// ジョブが終わったら現在のページと台帳を読み直す
+  void _watchJob(Job job) {
+    job.stream.listen(null, onDone: () {
+      if (!mounted) return;
+      final n = ref.read(pageEditorProvider.notifier);
+      final s = ref.read(pageEditorProvider);
+      if (s != null) n.open(s.ref);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${job.label}: ${job.status == JobStatus.succeeded ? '完了' : job.errorMessage ?? '終了'}')));
+    });
+  }
+
+  Future<void> _repassCurrent(PageEditorState s, {bool force = false}) async {
+    final job = await ref.read(jobsProvider.notifier).start(
+      ['repass', s.ref.title, '--run', s.ref.run, '--volume', '${s.ref.volume}', '--page', '${s.ref.page}', if (force) '--force'],
+      label: '再抽出: ${s.ref.title} ${s.ref.volume}巻 p${s.ref.page} (${s.ref.run})',
+      run: s.ref.run,
+    );
+    _watchJob(job);
+    setState(() {});
+  }
 
   @override
   void initState() {
@@ -64,6 +89,39 @@ class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
               const VerticalDivider(),
               IconButton(tooltip: '元に戻す (⌘Z)', icon: const Icon(Icons.undo), onPressed: s.undo != null ? n.undo : null),
               IconButton(tooltip: 'キャラ台帳', icon: Icon(_showCharacters ? Icons.people : Icons.people_outline), onPressed: () => setState(() => _showCharacters = !_showCharacters)),
+              const VerticalDivider(),
+              IconButton(
+                tooltip: r == null ? 'このページを抽出' : (r.isLocked ? 'このページを再抽出（手動修正を上書き）' : 'このページを再抽出'),
+                icon: const Icon(Icons.autorenew),
+                onPressed: locked
+                    ? null
+                    : () async {
+                        if (r != null && r.isLocked) {
+                          final ok = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('手動修正を上書きしますか？'),
+                              content: const Text('このページには手動で修正した行があります。再抽出すると上書きされます。'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('キャンセル')),
+                                FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('上書きして再抽出')),
+                              ],
+                            ),
+                          );
+                          if (ok != true) return;
+                        }
+                        await _repassCurrent(s, force: r?.isLocked ?? false);
+                      },
+              ),
+              IconButton(
+                tooltip: 'エクスポート',
+                icon: const Icon(Icons.download_outlined),
+                onPressed: () async {
+                  final job = await showExportDialog(context, ref, title: widget.title, run: widget.run);
+                  if (job != null) _watchJob(job);
+                },
+              ),
+              const AppActions(),
             ],
           ),
           body: Row(

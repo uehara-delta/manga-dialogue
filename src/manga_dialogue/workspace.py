@@ -1,8 +1,16 @@
+import json
+import os
 import shutil
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 DEFAULT_ROOT = Path("works")
 DEFAULT_RUN = "default"
+
+
+class RunLocked(RuntimeError):
+    """別のプロセスがこの run を書き換え中"""
 
 
 class Work:
@@ -36,6 +44,37 @@ class Work:
     @property
     def pending_renames_path(self) -> Path:
         return self.run_dir / "pending_renames.jsonl"
+
+    @property
+    def lock_path(self) -> Path:
+        return self.run_dir / ".lock"
+
+    def current_lock(self) -> dict | None:
+        """有効なロックがあればその内容を返す。プロセスが消えている古いロックは無視する"""
+        if not self.lock_path.exists():
+            return None
+        try:
+            info = json.loads(self.lock_path.read_text(encoding="utf-8"))
+            os.kill(int(info["pid"]), 0)
+        except (ValueError, KeyError, ProcessLookupError, PermissionError):
+            return None
+        return info
+
+    @contextmanager
+    def locked(self, command: str):
+        """run を書き換える処理の間だけロックファイルを置く"""
+        held = self.current_lock()
+        if held is not None:
+            raise RunLocked(f"run '{self.run}' は実行中です（{held.get('command')}, pid {held.get('pid')}）")
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.lock_path.write_text(
+            json.dumps({"pid": os.getpid(), "command": command, "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}),
+            encoding="utf-8",
+        )
+        try:
+            yield
+        finally:
+            self.lock_path.unlink(missing_ok=True)
 
     @property
     def volumes_dir(self) -> Path:

@@ -21,6 +21,15 @@ class Refused(Exception):
 
 
 @dataclass(frozen=True)
+class Usage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+    def __add__(self, other: "Usage") -> "Usage":
+        return Usage(self.input_tokens + other.input_tokens, self.output_tokens + other.output_tokens)
+
+
+@dataclass(frozen=True)
 class ImagePart:
     media_type: str
     data: bytes
@@ -43,6 +52,12 @@ class VisionModel(ABC):
 
     def __init__(self, model: str) -> None:
         self.model = model
+        self.last_usage = Usage()
+        self.total_usage = Usage()
+
+    def _record(self, usage: Usage) -> None:
+        self.last_usage = usage
+        self.total_usage = self.total_usage + usage
 
     @abstractmethod
     def _complete(self, system: str, parts: list[Part], schema: type[T], max_tokens: int) -> T:

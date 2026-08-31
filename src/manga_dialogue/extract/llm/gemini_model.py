@@ -4,7 +4,7 @@ from google import genai
 from google.genai import errors, types
 from pydantic import ValidationError
 
-from manga_dialogue.extract.llm.base import ImagePart, ParseError, Part, TextPart, TransientError, VisionModel
+from manga_dialogue.extract.llm.base import ImagePart, ParseError, Part, TextPart, TransientError, Usage, VisionModel
 
 RETRYABLE_CLIENT_CODES = {429, 408}
 
@@ -36,6 +36,9 @@ class GeminiModel(VisionModel):
             if e.code in RETRYABLE_CLIENT_CODES:
                 raise TransientError(str(e)) from e
             raise
+        meta = response.usage_metadata
+        if meta is not None:
+            self._record(Usage(meta.prompt_token_count or 0, (meta.candidates_token_count or 0) + (meta.thoughts_token_count or 0)))
         text = response.text
         if not text:
             raise ParseError(f"応答が空でした (prompt_feedback={response.prompt_feedback})")

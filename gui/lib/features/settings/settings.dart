@@ -7,7 +7,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 class Settings {
-  Settings({required this.worksRoot, this.engineCommand = 'uv run manga-dialogue', this.engineWorkingDir});
+  Settings({required this.worksRoot, this.engineCommand = 'uv run --env-file .env manga-dialogue', this.engineWorkingDir});
 
   /// 作品データのルート（既定はアプリ起動ディレクトリ直下の works）
   String worksRoot;
@@ -30,7 +30,7 @@ class Settings {
         final j = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
         return Settings(
           worksRoot: j['worksRoot'] as String,
-          engineCommand: j['engineCommand'] as String? ?? 'uv run manga-dialogue',
+          engineCommand: j['engineCommand'] as String? ?? 'uv run --env-file .env manga-dialogue',
           engineWorkingDir: j['engineWorkingDir'] as String?,
         );
       } catch (_) {}

@@ -4,13 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import 'features/home/home_screen.dart';
+import 'features/jobs/jobs_screen.dart';
 import 'features/page_editor/page_editor_screen.dart';
+import 'features/settings/settings_screen.dart';
 
 /// 開発用: MD_INITIAL_ROUTE で起動時の画面を指定できる
 final router = GoRouter(
   initialLocation: Platform.environment['MD_INITIAL_ROUTE'] ?? '/',
   routes: [
     GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
+    GoRoute(path: '/jobs', builder: (context, state) => const JobsScreen()),
+    GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
     GoRoute(
       path: '/edit/:title/:run/:volume',
       builder: (context, state) => PageEditorScreen(

@@ -387,6 +387,13 @@ Windows では fvm を https://fvm.app/documentation/getting-started/installatio
 `works/` なので、開発中はこのリポジトリの `works/` を選んでください。設定は `~/.manga_dialogue_gui.json` に
 保存されます。
 
+設定画面（右上の歯車）でエンジンの起動コマンドと作業ディレクトリを指定し、「接続確認」で
+`manga-dialogue info` の応答（バージョン、既定モデル、API キーの有無）を確認できます。
+開発中の既定は `uv run --env-file .env manga-dialogue`（作業ディレクトリ = このリポジトリ）です。
+
+エンジンの実行（抽出・再抽出・エクスポート）はジョブとして右上のジョブ画面に並び、進捗・
+トークン使用量・ログの確認とキャンセルができます。実行中の run は `.lock` により読み取り専用になります。
+
 開発用に `MD_INITIAL_ROUTE` 環境変数で起動時の画面を指定できます。
 
 ```bash

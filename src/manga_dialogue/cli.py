@@ -1,5 +1,8 @@
 import json
+import os
+import signal
 import sys
+from importlib.metadata import version as pkg_version
 from pathlib import Path
 
 import typer
@@ -8,11 +11,12 @@ from manga_dialogue.extract.characters import CharacterBook
 from manga_dialogue.extract.consolidate import propose_consolidation
 from manga_dialogue.extract.extractor import DEFAULT_MODEL, ExtractionFailed, extract_page
 from manga_dialogue.extract.llm import VisionModel, get_model
+from manga_dialogue.extract.llm import PROVIDER_PREFIXES
 from manga_dialogue.extract.fix import apply_changes, load_pages, propose_fix
 from manga_dialogue.extract.renames import apply_rename, record_pending
 from manga_dialogue.models import PageResult
 from manga_dialogue.output.export import FORMATS, export
-from manga_dialogue.workspace import DEFAULT_ROOT, DEFAULT_RUN, Work
+from manga_dialogue.workspace import DEFAULT_ROOT, DEFAULT_RUN, RunLocked, Work
 
 app = typer.Typer(help="Kindle の漫画画面をキャプチャし、セリフを文字起こしする")
 
@@ -41,10 +45,64 @@ class Reporter:
 reporter = Reporter(False)
 
 
+class Cancelled(Exception):
+    """SIGTERM / SIGINT による中断要求"""
+
+
+_cancel_requested = False
+
+
+def _request_cancel(signum, frame) -> None:
+    global _cancel_requested
+    _cancel_requested = True
+
+
+def _install_cancel_handlers() -> None:
+    signal.signal(signal.SIGTERM, _request_cancel)
+    signal.signal(signal.SIGINT, _request_cancel)
+
+
+def _check_cancel() -> None:
+    if _cancel_requested:
+        raise Cancelled()
+
+
+def _cancelled_exit(**data) -> None:
+    reporter.event("cancelled", "中断しました（--resume で続きから処理できます）", **data)
+    raise typer.Exit(130)
+
+
+def _locked_exit(e: RunLocked) -> None:
+    reporter.error(str(e), error_type="RunLocked")
+    raise typer.Exit(3)
+
+
 @app.callback()
 def main(json_output: bool = typer.Option(False, "--json", help="進捗と結果を JSON Lines で出力する")) -> None:
     global reporter
     reporter = Reporter(json_output)
+
+
+@app.command()
+def info(root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ")) -> None:
+    """エンジンの情報を JSON で返す（GUI の疎通確認用）"""
+    try:
+        ver = pkg_version("manga-dialogue")
+    except Exception:
+        ver = "unknown"
+    data = {
+        "version": ver,
+        "python": sys.version.split()[0],
+        "platform": sys.platform,
+        "default_model": DEFAULT_MODEL,
+        "providers": {
+            "anthropic": {"prefix": "claude-", "api_key": bool(os.environ.get("ANTHROPIC_API_KEY"))},
+            "gemini": {"prefix": "gemini-", "api_key": bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))},
+        },
+        "root": str(root.resolve()),
+        "root_exists": root.exists(),
+    }
+    sys.stdout.write(json.dumps({"event": "info", **data}, ensure_ascii=False) + "\n")
 
 
 @app.command()
@@ -140,8 +198,13 @@ def _process_page(
         new_characters=[c.name for c in added],
         renames_applied=applied,
         renames_pending=pending,
+        usage={"input_tokens": llm.last_usage.input_tokens, "output_tokens": llm.last_usage.output_tokens},
     )
     return result
+
+
+def _usage_total(llm: VisionModel) -> dict:
+    return {"input_tokens": llm.total_usage.input_tokens, "output_tokens": llm.total_usage.output_tokens}
 
 
 def _abort(error: Exception, **data) -> None:
@@ -187,21 +250,34 @@ def extract(
     work.ensure_dirs()
     book = CharacterBook.load(work.characters_path)
     llm = _get_model(model)
+    _install_cancel_handlers()
     reporter.event("start", total=len(images), volume=volume)
 
     failed: list[str] = []
-    for image in images:
-        if resume and work.output_path(int(image.stem)).exists():
-            continue
-        try:
-            _process_page(llm, work, image, book, rename_threshold)
-        except ExtractionFailed as e:
-            reporter.event("page_failed", f"失敗（スキップ）: {e}", volume=volume, page=int(image.stem), message=str(e))
-            failed.append(image.name)
-        except Exception as e:
-            _abort(e, done=len(images) - len(failed), failed=failed)
+    processed = 0
+    try:
+        with work.locked("extract"):
+            for image in images:
+                if resume and work.output_path(int(image.stem)).exists():
+                    continue
+                _check_cancel()
+                try:
+                    _process_page(llm, work, image, book, rename_threshold)
+                    processed += 1
+                except ExtractionFailed as e:
+                    reporter.event("page_failed", f"失敗（スキップ）: {e}", volume=volume, page=int(image.stem), message=str(e))
+                    failed.append(image.name)
+                except Exception as e:
+                    _abort(e, done=processed, failed=failed, usage=_usage_total(llm))
+    except RunLocked as e:
+        _locked_exit(e)
+    except Cancelled:
+        _cancelled_exit(done=processed, failed=failed, usage=_usage_total(llm))
 
-    reporter.event("done", f"完了: {work.output_dir} / 台帳 {len(book.characters)} 名", characters=len(book.characters), failed=failed)
+    reporter.event(
+        "done", f"完了: {work.output_dir} / 台帳 {len(book.characters)} 名",
+        processed=processed, characters=len(book.characters), failed=failed, usage=_usage_total(llm),
+    )
     _report_failures(failed)
 
 
@@ -265,17 +341,27 @@ def repass(
         return
 
     llm = _get_model(model)
+    _install_cancel_handlers()
     failed: list[str] = []
-    for vol, image in targets:
-        try:
-            _process_page(llm, vol, image, book, rename_threshold, final_book=True)
-        except ExtractionFailed as e:
-            reporter.event("page_failed", f"失敗（スキップ）: {e}", volume=vol.volume, page=int(image.stem), message=str(e))
-            failed.append(f"v{vol.volume:02d}/{image.name}")
-        except Exception as e:
-            _abort(e, failed=failed)
+    processed = 0
+    try:
+        with work.locked("repass"):
+            for vol, image in targets:
+                _check_cancel()
+                try:
+                    _process_page(llm, vol, image, book, rename_threshold, final_book=True)
+                    processed += 1
+                except ExtractionFailed as e:
+                    reporter.event("page_failed", f"失敗（スキップ）: {e}", volume=vol.volume, page=int(image.stem), message=str(e))
+                    failed.append(f"v{vol.volume:02d}/{image.name}")
+                except Exception as e:
+                    _abort(e, done=processed, failed=failed, usage=_usage_total(llm))
+    except RunLocked as e:
+        _locked_exit(e)
+    except Cancelled:
+        _cancelled_exit(done=processed, failed=failed, usage=_usage_total(llm))
 
-    reporter.event("done", f"完了: {len(targets) - len(failed)} ページ再抽出", processed=len(targets) - len(failed), failed=failed)
+    reporter.event("done", f"完了: {processed} ページ再抽出", processed=processed, failed=failed, usage=_usage_total(llm))
     _report_failures(failed)
 
 
@@ -299,8 +385,20 @@ def consolidate(
         raise typer.Exit(1)
 
     llm = _get_model(model)
-    plan = propose_consolidation(llm, book, work)
-    reporter.event("start", f"提案: {len(plan.renames)} 件", total=len(plan.renames))
+    try:
+        plan = propose_consolidation(llm, book, work)
+    except Exception as e:
+        _abort(e)
+    reporter.event("start", f"提案: {len(plan.renames)} 件", total=len(plan.renames), usage=_usage_total(llm))
+    applied = 0
+    try:
+        with work.locked("consolidate"):
+            _apply_consolidation(work, book, plan, rename_threshold, dry_run)
+    except RunLocked as e:
+        _locked_exit(e)
+
+
+def _apply_consolidation(work: Work, book: CharacterBook, plan, rename_threshold: float, dry_run: bool) -> None:
     applied = 0
     for r in plan.renames:
         known = book.find(r.from_name) is not None
@@ -336,7 +434,11 @@ def rename(
     if book.find(from_name) is None:
         reporter.error(f"台帳に見つかりません: {from_name}")
         raise typer.Exit(1)
-    n = apply_rename(work, book, from_name, to_name)
+    try:
+        with work.locked("rename"):
+            n = apply_rename(work, book, from_name, to_name)
+    except RunLocked as e:
+        _locked_exit(e)
     reporter.event("done", f"改名: {from_name} → {to_name} / 出力 {n} 件置換 / 台帳 {len(book.characters)} 名", replaced=n, characters=len(book.characters))
 
 
@@ -382,7 +484,10 @@ def fix(
         raise typer.Exit(1)
 
     llm = _get_model(model)
-    plan = propose_fix(llm, book, targets, instruction, with_images=with_images)
+    try:
+        plan = propose_fix(llm, book, targets, instruction, with_images=with_images)
+    except Exception as e:
+        _abort(e)
     reporter.event("start", f"変更案: {len(plan.changes)} 件（対象 {len(targets)} ページ）", total=len(plan.changes), pages=len(targets))
     by_page = {(v.volume, r.page): r for v, r in targets}
     for c in plan.changes:
@@ -402,8 +507,17 @@ def fix(
             before=before.model_dump() if before else None,
             speaker=c.speaker, text=c.text, panel=c.panel, reason=c.reason,
         )
-    applied = apply_changes(work, plan.changes) if apply else 0
-    reporter.event("done", f"完了: {applied} 件適用" if apply else "（--apply で適用）", applied=applied, proposed=len(plan.changes))
+    applied = 0
+    if apply:
+        try:
+            with work.locked("fix"):
+                applied = apply_changes(work, plan.changes)
+        except RunLocked as e:
+            _locked_exit(e)
+    reporter.event(
+        "done", f"完了: {applied} 件適用" if apply else "（--apply で適用）",
+        applied=applied, proposed=len(plan.changes), usage=_usage_total(llm),
+    )
 
 
 if __name__ == "__main__":

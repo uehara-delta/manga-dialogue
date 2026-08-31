@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../state/providers.dart';
+import '../../widgets/app_actions.dart';
+import '../jobs/run_dialogs.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -17,6 +19,7 @@ class HomeScreen extends ConsumerWidget {
         title: const Text('manga-dialogue'),
         actions: [
           IconButton(tooltip: '再読込', icon: const Icon(Icons.refresh), onPressed: () => ref.read(worksProvider.notifier).refresh()),
+          const AppActions(),
         ],
       ),
       body: Column(
@@ -51,12 +54,21 @@ class HomeScreen extends ConsumerWidget {
                         subtitle: Text('巻: ${w.volumes.join(', ')}   run: ${w.runs.isEmpty ? '（未抽出）' : w.runs.join(', ')}'),
                         trailing: Wrap(
                           spacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             for (final run in w.runs)
                               ActionChip(
                                 label: Text(run),
                                 onPressed: () => context.go('/edit/${Uri.encodeComponent(w.title)}/$run/${w.volumes.isEmpty ? 1 : w.volumes.first}'),
                               ),
+                            IconButton(
+                              tooltip: '抽出を実行',
+                              icon: const Icon(Icons.play_arrow_outlined),
+                              onPressed: () async {
+                                final job = await showExtractDialog(context, ref, title: w.title, volumes: w.volumes, runs: w.runs);
+                                if (job != null && context.mounted) context.push('/jobs');
+                              },
+                            ),
                           ],
                         ),
                       );
