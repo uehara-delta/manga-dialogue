@@ -12,7 +12,7 @@ from manga_dialogue.extract.consolidate import propose_consolidation
 from manga_dialogue.extract.extractor import DEFAULT_MODEL, ExtractionFailed, extract_page
 from manga_dialogue.extract.llm import VisionModel, get_model
 from manga_dialogue.extract.llm import PROVIDER_PREFIXES
-from manga_dialogue.extract.fix import apply_changes, load_pages, propose_fix
+from manga_dialogue.extract.fix import FixPlan, apply_changes, load_pages, propose_fix
 from manga_dialogue.extract.pending import PendingRename, PendingStore
 from manga_dialogue.extract.renames import apply_rename, record_pending
 from manga_dialogue.models import PageResult
@@ -466,11 +466,12 @@ def export_cmd(
 @app.command()
 def fix(
     title: str = typer.Argument(help="作品名"),
-    instruction: str = typer.Option(..., "--instruction", "-i", help="修正の指示文"),
+    instruction: str | None = typer.Option(None, "--instruction", "-i", help="修正の指示文"),
     volume: int | None = typer.Option(None, help="巻番号（省略時は全巻）"),
     pages: list[int] = typer.Option([], "--page", help="対象ページ（複数指定可。省略時は範囲内の全ページ）"),
     with_images: bool = typer.Option(False, help="対象ページの画像も添付する（費用増）"),
     apply: bool = typer.Option(False, help="変更案を適用する（省略時は提案のみ）"),
+    apply_from: Path | None = typer.Option(None, "--apply-from", help="変更案の JSON（{\"changes\": [...]}）を読み込んで適用する。API は呼ばない"),
     model: str = typer.Option(DEFAULT_MODEL, help="使用するモデル ID"),
     run: str = typer.Option(DEFAULT_RUN, help="結果を保存する run 名（モデルごとに分けるなど）"),
     root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
@@ -480,6 +481,19 @@ def fix(
     適用した行には manual が付き、以降の repass で上書きされなくなる。
     """
     work = Work(title, root, run=run)
+    if apply_from is not None:
+        plan = FixPlan.model_validate_json(apply_from.read_text(encoding="utf-8"))
+        try:
+            with work.locked("fix"):
+                applied = apply_changes(work, plan.changes)
+        except RunLocked as e:
+            _locked_exit(e)
+        reporter.event("done", f"完了: {applied} 件適用", applied=applied, proposed=len(plan.changes))
+        return
+    if not instruction:
+        reporter.error("--instruction（指示文）または --apply-from を指定してください")
+        raise typer.Exit(1)
+
     book = CharacterBook.load(work.characters_path)
     targets = load_pages(work, volume, pages)
     if not targets:

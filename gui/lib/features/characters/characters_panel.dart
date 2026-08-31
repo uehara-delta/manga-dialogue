@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../models/models.dart';
+import '../../state/engine_providers.dart';
 import '../../state/providers.dart';
 
 /// キャラ台帳の一覧と編集。名前の変更（統合）はエンジンの rename に委ねるため、ここでは別名と外見のみ編集する。
@@ -25,6 +26,11 @@ class CharactersPanel extends ConsumerWidget {
             children: [
               Text('キャラ台帳  ${characters.length} 名（仮名 ${characters.where((c) => c.isProvisional).length}）', style: const TextStyle(fontWeight: FontWeight.bold)),
               const Spacer(),
+              TextButton.icon(
+                icon: const Icon(Icons.merge_type, size: 16),
+                label: const Text('台帳を整理'),
+                onPressed: () => _consolidate(context, ref),
+              ),
               TextButton.icon(
                 icon: const Icon(Icons.rule, size: 16),
                 label: const Text('改名候補のレビュー'),
@@ -52,6 +58,11 @@ class CharactersPanel extends ConsumerWidget {
                   if (c.aliases.isNotEmpty) ...[const SizedBox(width: 8), Text('別名: ${c.aliases.join(', ')}', style: const TextStyle(fontSize: 11, color: Colors.grey))],
                 ]),
                 subtitle: Text(c.appearance, maxLines: 1, overflow: TextOverflow.ellipsis),
+                trailing: IconButton(
+                  tooltip: '別のキャラに統合（rename）',
+                  icon: const Icon(Icons.call_merge, size: 18),
+                  onPressed: () => _mergeDialog(context, ref, characters, c),
+                ),
                 onTap: () => _editDialog(context, ref, characters, c),
               );
             },
@@ -59,6 +70,77 @@ class CharactersPanel extends ConsumerWidget {
         ),
       ],
     );
+  }
+
+  /// consolidate をジョブとして実行し、終わったらレビュー画面を開く
+  Future<void> _consolidate(BuildContext context, WidgetRef ref) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('台帳を整理しますか？'),
+        content: const Text('全セリフを通読させて仮名の解決と重複の統合を提案させます。確信度 0.8 以上は自動で適用され、それ以外は改名候補として保留されます。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('キャンセル')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('実行')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final job = await ref.read(jobsProvider.notifier).start(['consolidate', title, '--run', run], label: '台帳の整理: $title ($run)', run: run);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('台帳の整理を開始しました。完了するとレビュー画面を開きます')));
+    job.stream.listen(null, onDone: () {
+      if (!context.mounted) return;
+      ref.read(charactersProvider.notifier).load(title, run);
+      final applied = job.events.where((e) => e.type == 'done').map((e) => e.data['applied']).firstOrNull;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(job.errorMessage ?? '台帳の整理が完了しました（自動適用 $applied 件）')));
+      if (job.errorMessage == null) context.push('/review/${Uri.encodeComponent(title)}/$run');
+    });
+  }
+
+  /// rename で別キャラに統合する
+  Future<void> _mergeDialog(BuildContext context, WidgetRef ref, List<Character> all, Character from) async {
+    String? target;
+    final counts = ref.read(workspaceProvider).speakerCounts(title, run);
+    final others = [...all.where((c) => c != from)]..sort((a, b) => (counts[b.name] ?? 0).compareTo(counts[a.name] ?? 0));
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text('「${from.name}」を統合'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('統合先を選んでください。「${from.name}」のセリフ ${counts[from.name] ?? 0} 件の話者が置き換わり、名前は統合先の別名に残ります。'),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: target,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: '統合先'),
+                  items: [for (final c in others) DropdownMenuItem(value: c.name, child: Text('${c.name}  (${counts[c.name] ?? 0} 件)', overflow: TextOverflow.ellipsis))],
+                  onChanged: (v) => setState(() => target = v),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('キャンセル')),
+            FilledButton(onPressed: target == null ? null : () => Navigator.pop(context, true), child: const Text('統合')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || target == null || !context.mounted) return;
+    final events = await ref.read(engineServiceProvider).query(['rename', title, from.name, target!, '--run', run]);
+    if (!context.mounted) return;
+    final err = events.where((e) => e.type == 'error').map((e) => e.data['message'] as String?).firstOrNull;
+    final done = events.where((e) => e.type == 'done').map((e) => e.data).firstOrNull;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err ?? '統合しました（出力 ${done?['replaced']} 件を置換）')));
+    ref.read(charactersProvider.notifier).load(title, run);
+    final s = ref.read(pageEditorProvider);
+    if (s != null) ref.read(pageEditorProvider.notifier).open(s.ref);
   }
 
   Future<void> _editDialog(BuildContext context, WidgetRef ref, List<Character> all, Character? c) async {

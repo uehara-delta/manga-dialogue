@@ -10,6 +10,7 @@ import '../../state/providers.dart';
 import '../../workspace/workspace.dart';
 import '../../widgets/app_actions.dart';
 import '../characters/characters_panel.dart';
+import '../fix/fix_dialog.dart';
 import '../jobs/run_dialogs.dart';
 import 'line_list.dart';
 import 'page_image.dart';
@@ -119,6 +120,16 @@ class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
                           if (ok != true) return;
                         }
                         await _repassCurrent(s, force: r?.isLocked ?? false);
+                      },
+              ),
+              IconButton(
+                tooltip: 'AI による一括修正',
+                icon: const Icon(Icons.auto_fix_high),
+                onPressed: locked
+                    ? null
+                    : () async {
+                        final applied = await showFixDialog(context, ref, page: s.ref);
+                        if (applied && mounted) n.open(s.ref);
                       },
               ),
               IconButton(
