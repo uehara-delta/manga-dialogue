@@ -7,9 +7,9 @@ import '../../engine/engine_service.dart';
 import '../../state/engine_providers.dart';
 
 /// 抽出（extract）の実行ダイアログ
-Future<Job?> showExtractDialog(BuildContext context, WidgetRef ref, {required String title, required List<int> volumes, required List<String> runs, String? defaultModel}) async {
+Future<Job?> showExtractDialog(BuildContext context, WidgetRef ref, {required String title, required List<int> volumes, required List<String> runs, String? defaultRun, String? defaultModel}) async {
   var volume = volumes.isEmpty ? 1 : volumes.first;
-  final run = TextEditingController(text: runs.contains('gemini') ? 'gemini' : (runs.isEmpty ? 'default' : runs.first));
+  final run = TextEditingController(text: defaultRun ?? (runs.isEmpty ? 'default' : runs.first));
   final model = TextEditingController(text: defaultModel ?? 'gemini-3.7-flash');
   var resume = true;
   final ok = await showDialog<bool>(
@@ -28,7 +28,7 @@ Future<Job?> showExtractDialog(BuildContext context, WidgetRef ref, {required St
                 items: [for (final v in (volumes.isEmpty ? [1] : volumes)) DropdownMenuItem(value: v, child: Text('$v'))],
                 onChanged: (v) => setState(() => volume = v ?? volume),
               ),
-              TextField(controller: run, decoration: const InputDecoration(labelText: 'run 名（結果の保存先）')),
+              TextField(controller: run, decoration: const InputDecoration(labelText: '抽出データの名前', helperText: '通常は変えなくてよい。別のモデルで比較したいときだけ新しい名前にする')),
               TextField(controller: model, decoration: const InputDecoration(labelText: 'モデル')),
               CheckboxListTile(
                 value: resume,

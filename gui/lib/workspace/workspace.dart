@@ -107,6 +107,56 @@ class Workspace {
 
   bool isLocked(String title, String run) => File(lockPath(title, run)).existsSync();
 
+  /// run × 巻 の抽出済みページ数
+  int countOutputs(String title, String run, int volume) {
+    final dir = Directory(outputDir(title, run, volume));
+    if (!dir.existsSync()) return 0;
+    return dir.listSync().whereType<File>().where((f) => f.path.endsWith('.json')).length;
+  }
+
+  /// ディレクトリの合計サイズ（バイト）
+  int dirSize(String path) {
+    final dir = Directory(path);
+    if (!dir.existsSync()) return 0;
+    var total = 0;
+    for (final f in dir.listSync(recursive: true).whereType<File>()) {
+      total += f.lengthSync();
+    }
+    return total;
+  }
+
+  /// キャプチャ 1 ページを削除する。全 run の対応する抽出結果も消す
+  void deleteCapturePage(String title, int volume, int page) {
+    final png = File(p.join(capturesDir(title, volume), '${_nnnn(page)}.png'));
+    if (png.existsSync()) png.deleteSync();
+    for (final run in listRuns(title)) {
+      final out = File(p.join(outputDir(title, run, volume), '${_nnnn(page)}.json'));
+      if (out.existsSync()) out.deleteSync();
+    }
+  }
+
+  /// 巻のキャプチャと全 run の抽出結果を削除する
+  void deleteVolume(String title, int volume) {
+    final dir = Directory(p.join(workDir(title), 'volumes', _nn(volume)));
+    if (dir.existsSync()) dir.deleteSync(recursive: true);
+    for (final run in listRuns(title)) {
+      final out = Directory(p.join(runDir(title, run), 'volumes', _nn(volume)));
+      if (out.existsSync()) out.deleteSync(recursive: true);
+    }
+  }
+
+  /// run（台帳と全巻の抽出結果）を削除する
+  void deleteRun(String title, String run) {
+    final dir = Directory(runDir(title, run));
+    if (dir.existsSync()) dir.deleteSync(recursive: true);
+  }
+
+  /// 作品全体を削除する
+  void deleteWork(String title) {
+    final dir = Directory(workDir(title));
+    if (dir.existsSync()) dir.deleteSync(recursive: true);
+  }
+
   PageResult? loadPage(PageRef r) {
     final f = File(outputPath(r));
     if (!f.existsSync()) return null;

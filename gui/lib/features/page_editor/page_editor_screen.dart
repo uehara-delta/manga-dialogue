@@ -56,6 +56,7 @@ class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(pageEditorProvider.notifier).open(PageRef(title: widget.title, run: widget.run, volume: widget.volume, page: widget.page ?? 1));
+      ref.read(settingsProvider.notifier).update((s) => s.lastRun[widget.title] = widget.run);
     });
   }
 
@@ -90,7 +91,18 @@ class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
         child: Scaffold(
           appBar: AppBar(
             leading: IconButton(icon: const Icon(Icons.home_outlined), onPressed: () => context.go('/')),
-            title: Text('${widget.title}   run: ${widget.run}   ${widget.volume}巻'),
+            title: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(widget.title),
+                const SizedBox(width: 12),
+                _VolumeSwitcher(title: widget.title, run: widget.run, volume: widget.volume),
+                if (ws.listRuns(widget.title).length > 1) ...[
+                  const SizedBox(width: 12),
+                  Text('抽出データ: ${widget.run}', style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                ],
+              ],
+            ),
             actions: [
               if (locked) const Padding(padding: EdgeInsets.only(right: 12), child: Chip(label: Text('エンジン実行中（読み取り専用）'))),
               IconButton(tooltip: '次のページ（左へ進む） ←', icon: const Icon(Icons.chevron_left), onPressed: s.hasNext ? n.next : null),
@@ -259,4 +271,24 @@ class _PageJump extends StatelessWidget {
           ),
         ),
       );
+}
+
+
+class _VolumeSwitcher extends ConsumerWidget {
+  const _VolumeSwitcher({required this.title, required this.run, required this.volume});
+  final String title;
+  final String run;
+  final int volume;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final volumes = ref.watch(workspaceProvider).listVolumes(title);
+    if (volumes.length <= 1) return Text('$volume巻', style: const TextStyle(fontSize: 16));
+    return DropdownButton<int>(
+      value: volumes.contains(volume) ? volume : null,
+      isDense: true,
+      underline: const SizedBox(),
+      items: [for (final v in volumes) DropdownMenuItem(value: v, child: Text('$v巻'))],
+      onChanged: (v) { if (v != null && v != volume) context.go('/edit/${Uri.encodeComponent(title)}/$run/$v'); },
+    );
+  }
 }

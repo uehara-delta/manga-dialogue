@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import 'features/capture/captures_screen.dart';
 import 'features/home/home_screen.dart';
 import 'features/jobs/jobs_screen.dart';
 import 'features/page_editor/page_editor_screen.dart';
@@ -15,6 +16,10 @@ final router = GoRouter(
   routes: [
     GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
     GoRoute(path: '/jobs', builder: (context, state) => const JobsScreen()),
+    GoRoute(
+      path: '/captures/:title/:volume',
+      builder: (context, state) => CapturesScreen(title: state.pathParameters['title']!, volume: int.parse(state.pathParameters['volume']!)),
+    ),
     GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
     GoRoute(
       path: '/review/:title/:run',

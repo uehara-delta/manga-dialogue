@@ -9,9 +9,18 @@ import 'package:path/path.dart' as p;
 import '../../engine/engine_locator.dart';
 
 class Settings {
-  Settings({required this.worksRoot, String? engineCommand, this.engineWorkingDir, Map<String, String>? apiKeys})
-      : engineCommand = engineCommand ?? EngineLocator.defaultCommand(),
-        apiKeys = apiKeys ?? {};
+  Settings({
+    required this.worksRoot,
+    String? engineCommand,
+    this.engineWorkingDir,
+    Map<String, String>? apiKeys,
+    Map<String, String>? lastRun,
+    this.defaultModel = 'gemini-3.7-flash',
+    this.captureKey = 'space',
+    this.captureDelay = 1.5,
+  })  : engineCommand = engineCommand ?? EngineLocator.defaultCommand(),
+        apiKeys = apiKeys ?? {},
+        lastRun = lastRun ?? {};
 
   /// 作品データのルート（既定はアプリ起動ディレクトリ直下の works）
   String worksRoot;
@@ -27,6 +36,16 @@ class Settings {
   Map<String, String> apiKeys;
 
   Map<String, String> get environment => {for (final e in apiKeys.entries) if (e.value.trim().isNotEmpty) e.key: e.value.trim()};
+
+  /// 作品ごとに最後に開いた run（抽出データ）
+  Map<String, String> lastRun;
+
+  /// 抽出に使う既定モデル
+  String defaultModel;
+
+  /// キャプチャの既定設定
+  String captureKey;
+  double captureDelay;
 
   /// 配布時の既定 works: アプリと同じ階層（macOS は .app の隣、Windows は exe のフォルダ）
   static String _appDir() {
@@ -53,6 +72,10 @@ class Settings {
           engineCommand: j['engineCommand'] as String?,
           engineWorkingDir: j['engineWorkingDir'] as String?,
           apiKeys: {for (final e in (j['apiKeys'] as Map<String, dynamic>? ?? {}).entries) e.key: e.value as String},
+          lastRun: {for (final e in (j['lastRun'] as Map<String, dynamic>? ?? {}).entries) e.key: e.value as String},
+          defaultModel: j['defaultModel'] as String? ?? 'gemini-3.7-flash',
+          captureKey: j['captureKey'] as String? ?? 'space',
+          captureDelay: (j['captureDelay'] as num?)?.toDouble() ?? 1.5,
         );
       } catch (_) {}
     }
@@ -65,6 +88,10 @@ class Settings {
       'engineCommand': engineCommand,
       'engineWorkingDir': engineWorkingDir,
       'apiKeys': apiKeys,
+      'lastRun': lastRun,
+      'defaultModel': defaultModel,
+      'captureKey': captureKey,
+      'captureDelay': captureDelay,
     }));
   }
 }

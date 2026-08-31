@@ -5,15 +5,25 @@ import 'package:go_router/go_router.dart';
 
 import '../../state/providers.dart';
 import '../../widgets/app_actions.dart';
-import '../jobs/run_dialogs.dart';
+import '../../workspace/workspace.dart';
+import '../capture/capture_dialog.dart';
+import 'work_detail.dart';
 
-class HomeScreen extends ConsumerWidget {
+/// トップ画面。左に作品一覧、右に選んだ作品の巻ごとの状況と操作。
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
+  @override
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  String? _selectedTitle;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
     final works = ref.watch(worksProvider);
+    final selected = works.where((w) => w.title == _selectedTitle).firstOrNull ?? works.firstOrNull;
     return Scaffold(
       appBar: AppBar(
         title: const Text('manga-dialogue'),
@@ -22,61 +32,71 @@ class HomeScreen extends ConsumerWidget {
           const AppActions(),
         ],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: Row(
         children: [
-          ListTile(
-            leading: const Icon(Icons.folder_outlined),
-            title: Text(settings.worksRoot, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
-            subtitle: const Text('作品データの場所（works）'),
-            trailing: TextButton(
-              child: const Text('変更'),
-              onPressed: () async {
-                final dir = await FilePicker.getDirectoryPath(dialogTitle: 'works フォルダを選択');
-                if (dir != null) {
-                  ref.read(settingsProvider.notifier).update((s) => s.worksRoot = dir);
-                  ref.read(worksProvider.notifier).refresh();
-                }
-              },
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: works.isEmpty
-                ? const Center(child: Text('作品がありません。works フォルダを指定するか、キャプチャを実行してください。'))
-                : ListView.separated(
-                    itemCount: works.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, i) {
-                      final w = works[i];
-                      return ListTile(
-                        title: Text(w.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text('巻: ${w.volumes.join(', ')}   run: ${w.runs.isEmpty ? '（未抽出）' : w.runs.join(', ')}'),
-                        trailing: Wrap(
-                          spacing: 6,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            for (final run in w.runs)
-                              ActionChip(
-                                label: Text(run),
-                                onPressed: () => context.go('/edit/${Uri.encodeComponent(w.title)}/$run/${w.volumes.isEmpty ? 1 : w.volumes.first}'),
-                              ),
-                            IconButton(
-                              tooltip: '抽出を実行',
-                              icon: const Icon(Icons.play_arrow_outlined),
-                              onPressed: () async {
-                                final job = await showExtractDialog(context, ref, title: w.title, volumes: w.volumes, runs: w.runs);
-                                if (job != null && context.mounted) context.push('/jobs');
-                              },
-                            ),
-                          ],
-                        ),
-                      );
+          SizedBox(
+            width: 300,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.add_a_photo_outlined),
+                    label: const Text('新しい作品をキャプチャ'),
+                    onPressed: () async {
+                      final job = await showCaptureDialog(context, ref);
+                      if (job != null && context.mounted) context.push('/jobs');
                     },
                   ),
+                ),
+                Expanded(
+                  child: works.isEmpty
+                      ? const Padding(padding: EdgeInsets.all(16), child: Text('作品がありません。Kindle で本を開いて「新しい作品をキャプチャ」から始めてください。', style: TextStyle(color: Colors.grey)))
+                      : ListView.builder(
+                          itemCount: works.length,
+                          itemBuilder: (context, i) {
+                            final w = works[i];
+                            return ListTile(
+                              selected: w.title == selected?.title,
+                              title: Text(w.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                              subtitle: Text('${w.volumes.length} 巻${w.runs.isEmpty ? '（未抽出）' : ''}'),
+                              onTap: () => setState(() => _selectedTitle = w.title),
+                            );
+                          },
+                        ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.folder_outlined, size: 18),
+                  title: Text(settings.worksRoot, style: const TextStyle(fontFamily: 'monospace', fontSize: 11), overflow: TextOverflow.ellipsis),
+                  trailing: TextButton(
+                    child: const Text('変更'),
+                    onPressed: () async {
+                      final dir = await FilePicker.getDirectoryPath(dialogTitle: 'works フォルダを選択');
+                      if (dir != null) {
+                        ref.read(settingsProvider.notifier).update((s) => s.worksRoot = dir);
+                        ref.read(worksProvider.notifier).refresh();
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const VerticalDivider(width: 1),
+          Expanded(
+            child: selected == null
+                ? const Center(child: Text('作品を選ぶと、巻ごとの状況と操作がここに表示されます', style: TextStyle(color: Colors.grey)))
+                : WorkDetail(key: ValueKey(selected.title), work: selected),
           ),
         ],
       ),
     );
   }
+}
+
+extension on Iterable<WorkSummary> {
+  WorkSummary? get firstOrNull => isEmpty ? null : first;
 }
