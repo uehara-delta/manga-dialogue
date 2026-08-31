@@ -28,6 +28,7 @@ class PageEditorScreen extends ConsumerStatefulWidget {
 
 class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
   bool _showCharacters = false;
+  bool _showMarkers = true;
 
   /// ジョブが終わったら現在のページと台帳を読み直す
   void _watchJob(Job job) {
@@ -64,7 +65,7 @@ class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
     final n = ref.read(pageEditorProvider.notifier);
     final ws = ref.watch(workspaceProvider);
     final characters = ref.watch(charactersProvider);
-    final speakers = [...specialSpeakers, ...characters.map((c) => c.name)];
+    final speakers = [for (final n in specialSpeakers) SpeakerOption(n), for (final c in characters) SpeakerOption(c.name, c.aliases)];
     final locked = ws.isLocked(widget.title, widget.run);
 
     if (s == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -72,9 +73,17 @@ class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
 
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.arrowLeft, meta: true): n.prev,
-        const SingleActivator(LogicalKeyboardKey.arrowRight, meta: true): n.next,
+        // テキスト欄の編集中はカーソル移動が優先され、ここには届かない
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): n.next,
+        const SingleActivator(LogicalKeyboardKey.arrowRight): n.prev,
+        const SingleActivator(LogicalKeyboardKey.arrowLeft, meta: true): n.next,
+        const SingleActivator(LogicalKeyboardKey.arrowRight, meta: true): n.prev,
         const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): n.undo,
+        const SingleActivator(LogicalKeyboardKey.keyM): () => setState(() => _showMarkers = !_showMarkers),
+        const SingleActivator(LogicalKeyboardKey.backspace, meta: true): () {
+          final sel = ref.read(pageEditorProvider)?.selected;
+          if (sel != null && !locked) n.removeLine(sel);
+        },
       },
       child: Focus(
         autofocus: true,
@@ -84,10 +93,15 @@ class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
             title: Text('${widget.title}   run: ${widget.run}   ${widget.volume}巻'),
             actions: [
               if (locked) const Padding(padding: EdgeInsets.only(right: 12), child: Chip(label: Text('エンジン実行中（読み取り専用）'))),
-              IconButton(tooltip: '前のページ (⌘←)', icon: const Icon(Icons.chevron_left), onPressed: s.hasPrev ? n.prev : null),
+              IconButton(tooltip: '次のページ（左へ進む） ←', icon: const Icon(Icons.chevron_left), onPressed: s.hasNext ? n.next : null),
               _PageJump(pages: s.pages, current: s.ref.page, onJump: n.goTo),
-              IconButton(tooltip: '次のページ (⌘→)', icon: const Icon(Icons.chevron_right), onPressed: s.hasNext ? n.next : null),
+              IconButton(tooltip: '前のページ（右へ戻る） →', icon: const Icon(Icons.chevron_right), onPressed: s.hasPrev ? n.prev : null),
               const VerticalDivider(),
+              IconButton(
+                tooltip: _showMarkers ? '番号マーカーを隠す (M)' : '番号マーカーを表示 (M)',
+                icon: Icon(_showMarkers ? Icons.pin_drop : Icons.pin_drop_outlined),
+                onPressed: () => setState(() => _showMarkers = !_showMarkers),
+              ),
               IconButton(tooltip: '元に戻す (⌘Z)', icon: const Icon(Icons.undo), onPressed: s.undo != null ? n.undo : null),
               IconButton(tooltip: 'キャラ台帳', icon: Icon(_showCharacters ? Icons.people : Icons.people_outline), onPressed: () => setState(() => _showCharacters = !_showCharacters)),
               IconButton(
@@ -151,6 +165,7 @@ class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
                   path: ws.capturePath(s.ref),
                   lines: r?.lines ?? const [],
                   selected: s.selected,
+                  showMarkers: _showMarkers,
                   onSelect: n.select,
                   onTapEmpty: (x, y) => locked ? null : n.addLine(x: x, y: y),
                 ),
@@ -175,6 +190,7 @@ class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
                                 onSpeaker: (i, v) => n.editLine(i, (l) => l.speaker = v),
                                 onText: (i, v) => n.editLine(i, (l) => l.text = v),
                                 onPanel: (i, v) => n.editLine(i, (l) => l.panel = v),
+                                onDelete: n.removeLine,
                               ),
                             ),
                           ),

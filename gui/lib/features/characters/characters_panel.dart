@@ -7,38 +7,77 @@ import '../../state/engine_providers.dart';
 import '../../state/providers.dart';
 
 /// キャラ台帳の一覧と編集。名前の変更（統合）はエンジンの rename に委ねるため、ここでは別名と外見のみ編集する。
-class CharactersPanel extends ConsumerWidget {
+class CharactersPanel extends ConsumerStatefulWidget {
   const CharactersPanel({super.key, required this.title, required this.run});
   final String title;
   final String run;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CharactersPanel> createState() => _CharactersPanelState();
+}
+
+class _CharactersPanelState extends ConsumerState<CharactersPanel> {
+  String _query = '';
+  String get title => widget.title;
+  String get run => widget.run;
+
+  @override
+  Widget build(BuildContext context) {
     final characters = ref.watch(charactersProvider);
     final counts = ref.watch(workspaceProvider).speakerCounts(title, run);
-    final sorted = [...characters]..sort((a, b) => (counts[b.name] ?? 0).compareTo(counts[a.name] ?? 0));
+    final q = _query.trim().toLowerCase();
+    final filtered = q.isEmpty
+        ? characters
+        : characters.where((c) => c.name.toLowerCase().contains(q) || c.aliases.any((a) => a.toLowerCase().contains(q)) || c.appearance.toLowerCase().contains(q)).toList();
+    final sorted = [...filtered]..sort((a, b) => (counts[b.name] ?? 0).compareTo(counts[a.name] ?? 0));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+          padding: const EdgeInsets.fromLTRB(12, 6, 8, 4),
           child: Row(
             children: [
-              Text('キャラ台帳  ${characters.length} 名（仮名 ${characters.where((c) => c.isProvisional).length}）', style: const TextStyle(fontWeight: FontWeight.bold)),
-              const Spacer(),
-              TextButton.icon(
-                icon: const Icon(Icons.merge_type, size: 16),
-                label: const Text('台帳を整理'),
+              Flexible(
+                fit: FlexFit.loose,
+                child: Text(
+                  '台帳 ${characters.length} 名（仮名 ${characters.where((c) => c.isProvisional).length}）',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 320),
+                  child: TextField(
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: '名前・別名・外見で検索',
+                      prefixIcon: const Icon(Icons.search, size: 16),
+                      suffixIcon: _query.isEmpty ? null : IconButton(icon: const Icon(Icons.clear, size: 16), onPressed: () => setState(() => _query = '')),
+                      border: const OutlineInputBorder(),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    ),
+                    style: const TextStyle(fontSize: 13),
+                    onChanged: (v) => setState(() => _query = v),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: '台帳を整理（consolidate）',
+                icon: const Icon(Icons.merge_type, size: 20),
                 onPressed: () => _consolidate(context, ref),
               ),
-              TextButton.icon(
-                icon: const Icon(Icons.rule, size: 16),
-                label: const Text('改名候補のレビュー'),
+              IconButton(
+                tooltip: '改名候補のレビュー',
+                icon: const Icon(Icons.rule, size: 20),
                 onPressed: () => context.push('/review/${Uri.encodeComponent(title)}/$run'),
               ),
-              TextButton.icon(
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('追加'),
+              IconButton(
+                tooltip: 'キャラを追加',
+                icon: const Icon(Icons.person_add_alt, size: 20),
                 onPressed: () => _editDialog(context, ref, characters, null),
               ),
             ],
@@ -55,7 +94,8 @@ class CharactersPanel extends ConsumerWidget {
                   Text(c.name, style: TextStyle(fontWeight: FontWeight.bold, color: c.isProvisional ? Colors.grey.shade700 : null)),
                   const SizedBox(width: 8),
                   Text('${counts[c.name] ?? 0} 件', style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                  if (c.aliases.isNotEmpty) ...[const SizedBox(width: 8), Text('別名: ${c.aliases.join(', ')}', style: const TextStyle(fontSize: 11, color: Colors.grey))],
+                  if (c.displayAliases.isNotEmpty) ...[const SizedBox(width: 8), Text('別名: ${c.displayAliases.join(', ')}', style: const TextStyle(fontSize: 11, color: Colors.grey))],
+                  if (c.mergedAliases.isNotEmpty) ...[const SizedBox(width: 8), Tooltip(message: '統合前の仮名: ${c.mergedAliases.join(', ')}', child: Text('統合 ${c.mergedAliases.length}', style: const TextStyle(fontSize: 11, color: Colors.grey)))],
                 ]),
                 subtitle: Text(c.appearance, maxLines: 1, overflow: TextOverflow.ellipsis),
                 trailing: IconButton(
@@ -133,19 +173,13 @@ class CharactersPanel extends ConsumerWidget {
       ),
     );
     if (ok != true || target == null || !context.mounted) return;
-    final events = await ref.read(engineServiceProvider).query(['rename', title, from.name, target!, '--run', run]);
-    if (!context.mounted) return;
-    final err = events.where((e) => e.type == 'error').map((e) => e.data['message'] as String?).firstOrNull;
-    final done = events.where((e) => e.type == 'done').map((e) => e.data).firstOrNull;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err ?? '統合しました（出力 ${done?['replaced']} 件を置換）')));
-    ref.read(charactersProvider.notifier).load(title, run);
-    final s = ref.read(pageEditorProvider);
-    if (s != null) ref.read(pageEditorProvider.notifier).open(s.ref);
+    await _rename(context, ref, from.name, target!);
   }
 
   Future<void> _editDialog(BuildContext context, WidgetRef ref, List<Character> all, Character? c) async {
+    final counts = ref.read(workspaceProvider).speakerCounts(title, run);
     final name = TextEditingController(text: c?.name ?? '');
-    final aliases = TextEditingController(text: c?.aliases.join(', ') ?? '');
+    final aliases = TextEditingController(text: c?.displayAliases.join(', ') ?? '');
     final appearance = TextEditingController(text: c?.appearance ?? '');
     final result = await showDialog<String>(
       context: context,
@@ -156,34 +190,71 @@ class CharactersPanel extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: name, decoration: const InputDecoration(labelText: '名前'), enabled: c == null),
-              if (c != null) const Padding(padding: EdgeInsets.only(top: 4), child: Text('名前の変更・統合はエンジンの rename で行います（出力の話者も一括で置き換わります）', style: TextStyle(fontSize: 11, color: Colors.grey))),
+              TextField(controller: name, decoration: const InputDecoration(labelText: '名前')),
+              if (c != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('名前を変えると出力の話者（${counts[c.name] ?? 0} 件）も置き換わります。既存のキャラ名にすると、そのキャラに統合されます。', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                  ),
+                ),
               TextField(controller: aliases, decoration: const InputDecoration(labelText: '別名（カンマ区切り）')),
+              if (c != null && c.mergedAliases.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('統合前の仮名（再登録を防ぐため保持）: ${c.mergedAliases.join(', ')}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                  ),
+                ),
               TextField(controller: appearance, decoration: const InputDecoration(labelText: '外見'), maxLines: 3),
             ],
           ),
         ),
         actions: [
           if (c != null) TextButton(onPressed: () => Navigator.pop(context, 'delete'), child: const Text('削除', style: TextStyle(color: Colors.red))),
+          if (c != null) TextButton(onPressed: () => Navigator.pop(context, 'merge'), child: const Text('別のキャラに統合…')),
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('キャンセル')),
           FilledButton(onPressed: () => Navigator.pop(context, 'save'), child: const Text('保存')),
         ],
       ),
     );
-    if (result == null) return;
+    if (result == null || !context.mounted) return;
+    if (result == 'merge') {
+      await _mergeDialog(context, ref, all, c!);
+      return;
+    }
     final list = [...all];
     if (result == 'delete') {
       list.remove(c);
-    } else {
-      final parsed = aliases.text.split(RegExp(r'[,、]')).map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
-      if (c == null) {
-        if (name.text.trim().isEmpty) return;
-        list.add(Character(name: name.text.trim(), aliases: parsed, appearance: appearance.text.trim()));
-      } else {
-        c.aliases = parsed;
-        c.appearance = appearance.text.trim();
-      }
+      ref.read(charactersProvider.notifier).save(title, run, list);
+      return;
     }
+    final newName = name.text.trim();
+    if (newName.isEmpty) return;
+    final parsed = aliases.text.split(RegExp(r'[,、]')).map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    if (c == null) {
+      list.add(Character(name: newName, aliases: parsed, appearance: appearance.text.trim()));
+      ref.read(charactersProvider.notifier).save(title, run, list);
+      return;
+    }
+    // 名前以外を先に保存し、名前が変わっていればエンジンの rename で出力ごと置き換える
+    c.aliases = [...parsed, ...c.mergedAliases];
+    c.appearance = appearance.text.trim();
     ref.read(charactersProvider.notifier).save(title, run, list);
+    if (newName != c.name) await _rename(context, ref, c.name, newName);
+  }
+
+  /// エンジンの rename を実行し、台帳と現在のページを再読込する
+  Future<void> _rename(BuildContext context, WidgetRef ref, String from, String to) async {
+    final events = await ref.read(engineServiceProvider).query(['rename', title, from, to, '--run', run]);
+    if (!context.mounted) return;
+    final err = events.where((e) => e.type == 'error').map((e) => e.data['message'] as String?).firstOrNull;
+    final done = events.where((e) => e.type == 'done').map((e) => e.data).firstOrNull;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err ?? '「$from」→「$to」（出力 ${done?['replaced']} 件を置換）')));
+    ref.read(charactersProvider.notifier).load(title, run);
+    final s = ref.read(pageEditorProvider);
+    if (s != null) ref.read(pageEditorProvider.notifier).open(s.ref);
   }
 }

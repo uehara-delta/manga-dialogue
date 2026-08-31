@@ -114,6 +114,12 @@ class Character {
 
   Map<String, dynamic> toJson() => {'name': name, 'aliases': aliases, 'appearance': appearance};
   bool get isProvisional => name.contains('（仮）');
+
+  /// 人が付けた別名（表示・編集の対象）
+  List<String> get displayAliases => aliases.where((a) => !a.contains('（仮）')).toList();
+
+  /// 統合前の仮名。同じ仮名で再登録されるのを防ぐためにデータとしては残す
+  List<String> get mergedAliases => aliases.where((a) => a.contains('（仮）')).toList();
 }
 
 /// 話者として選べる固定の値

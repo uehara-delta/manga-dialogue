@@ -93,15 +93,17 @@ class PageEditorNotifier extends Notifier<PageEditorState?> {
 
   void select(int? i) => state = state?.copyWith(selected: i, clearSelection: i == null);
 
-  /// 編集を適用して保存する。変更前の状態を 1 段だけ Undo 用に保持
-  void edit(void Function(PageResult r) apply, {bool markManual = true}) {
+  /// 編集を適用して保存する。変更前の状態を 1 段だけ Undo 用に保持。
+  /// apply が選択行を変えた場合（追加・削除・並べ替え）はそれを引き継ぐ
+  void edit(void Function(PageResult r) apply) {
     final s = state;
     final r = s?.result;
     if (s == null || r == null) return;
     final before = PageResult.fromJson(r.toJson());
     apply(r);
     _ws.savePage(s.ref, r);
-    state = s.copyWith(result: r, undo: before);
+    final current = state ?? s;
+    state = PageEditorState(ref: s.ref, pages: s.pages, result: r, selected: current.selected, undo: before);
   }
 
   void editLine(int i, void Function(Line l) apply) => edit((r) {
@@ -126,8 +128,11 @@ class PageEditorNotifier extends Notifier<PageEditorState?> {
   void removeLine(int i) => edit((r) {
         if (i < 0 || i >= r.lines.length) return;
         r.lines.removeAt(i);
-        final sel = state?.selected;
-        if (sel != null && sel >= r.lines.length) state = state!.copyWith(selected: r.lines.isEmpty ? null : r.lines.length - 1, clearSelection: r.lines.isEmpty);
+        if (r.lines.isEmpty) {
+          state = state!.copyWith(clearSelection: true);
+        } else {
+          state = state!.copyWith(selected: i.clamp(0, r.lines.length - 1));
+        }
       });
 
   void moveLine(int from, int to) => edit((r) {

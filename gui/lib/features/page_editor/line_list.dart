@@ -13,14 +13,16 @@ class LineList extends StatelessWidget {
     required this.onSpeaker,
     required this.onText,
     required this.onPanel,
+    required this.onDelete,
   });
   final List<Line> lines;
   final int? selected;
-  final List<String> speakers;
+  final List<SpeakerOption> speakers;
   final void Function(int) onSelect;
   final void Function(int, String) onSpeaker;
   final void Function(int, String) onText;
   final void Function(int, int) onPanel;
+  final void Function(int) onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -67,6 +69,15 @@ class LineList extends StatelessWidget {
                     ),
                   ),
                   if (l.manual) const Icon(Icons.edit, size: 14, color: Colors.grey),
+                  IconButton(
+                    tooltip: 'この行を削除 (⌘⌫)',
+                    icon: const Icon(Icons.delete_outline, size: 16),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    color: Colors.grey,
+                    onPressed: () => onDelete(i),
+                  ),
                 ],
               ),
             ),
@@ -94,24 +105,80 @@ class _PanelField extends StatelessWidget {
       );
 }
 
-class _SpeakerField extends StatelessWidget {
+/// 話者の補完入力。入力に応じて候補（名前・別名の部分一致）を絞り込み、候補にない名前も Enter で設定できる。
+class _SpeakerField extends StatefulWidget {
   const _SpeakerField({required this.value, required this.options, required this.onChanged});
   final String value;
-  final List<String> options;
+  final List<SpeakerOption> options;
   final void Function(String) onChanged;
   @override
+  State<_SpeakerField> createState() => _SpeakerFieldState();
+}
+
+class _SpeakerFieldState extends State<_SpeakerField> {
+  @override
   Widget build(BuildContext context) {
-    final items = {...options, value}.toList();
-    return DropdownButtonHideUnderline(
-      child: DropdownButton<String>(
-        value: value,
-        isDense: true,
-        isExpanded: true,
-        style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface, fontWeight: value == '不明' ? FontWeight.normal : FontWeight.bold),
-        items: [for (final s in items) DropdownMenuItem(value: s, child: Text(s, overflow: TextOverflow.ellipsis))],
-        onChanged: (v) { if (v != null && v != value) onChanged(v); },
+    final scheme = Theme.of(context).colorScheme;
+    return RawAutocomplete<SpeakerOption>(
+      key: ValueKey('speaker-${widget.value}'),
+      initialValue: TextEditingValue(text: widget.value),
+      displayStringForOption: (o) => o.name,
+      optionsBuilder: (v) {
+        final q = v.text.trim();
+        if (q.isEmpty || q == widget.value) return widget.options;
+        return widget.options.where((o) => o.matches(q));
+      },
+      onSelected: (o) { if (o.name != widget.value) widget.onChanged(o.name); },
+      fieldViewBuilder: (context, controller, focus, onSubmit) => TextField(
+        controller: controller,
+        focusNode: focus,
+        decoration: const InputDecoration(isDense: true, border: InputBorder.none, contentPadding: EdgeInsets.zero, hintText: '話者'),
+        style: TextStyle(fontSize: 13, fontWeight: widget.value == '不明' ? FontWeight.normal : FontWeight.bold, color: scheme.onSurface),
+        onTap: () { if (controller.text == widget.value) controller.selection = TextSelection(baseOffset: 0, extentOffset: controller.text.length); },
+        onSubmitted: (text) {
+          final t = text.trim();
+          if (t.isEmpty) { controller.text = widget.value; return; }
+          final exact = widget.options.where((o) => o.name == t || o.aliases.contains(t)).firstOrNull;
+          final name = exact?.name ?? t;
+          if (name != widget.value) widget.onChanged(name);
+          onSubmit();
+        },
+      ),
+      optionsViewBuilder: (context, onSelected, options) => Align(
+        alignment: Alignment.topLeft,
+        child: Material(
+          elevation: 4,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 260, maxWidth: 260),
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              shrinkWrap: true,
+              itemCount: options.length,
+              itemBuilder: (context, i) {
+                final o = options.elementAt(i);
+                return ListTile(
+                  dense: true,
+                  title: Text(o.name, style: const TextStyle(fontSize: 13)),
+                  subtitle: o.aliases.isEmpty ? null : Text(o.aliases.join(', '), style: const TextStyle(fontSize: 11)),
+                  onTap: () => onSelected(o),
+                );
+              },
+            ),
+          ),
+        ),
       ),
     );
+  }
+}
+
+/// 話者候補（名前と、部分一致に使う別名）
+class SpeakerOption {
+  const SpeakerOption(this.name, [this.aliases = const []]);
+  final String name;
+  final List<String> aliases;
+  bool matches(String q) {
+    final k = q.toLowerCase();
+    return name.toLowerCase().contains(k) || aliases.any((a) => a.toLowerCase().contains(k));
   }
 }
 
