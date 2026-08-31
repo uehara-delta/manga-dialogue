@@ -8,7 +8,7 @@ from manga_dialogue.extract.llm import ImagePart, TextPart, VisionModel
 from manga_dialogue.extract.prompt import SYSTEM_PROMPT, build_user_prompt
 from manga_dialogue.models import PageExtraction, cap_context_confidence, normalize_text, sort_reading_order
 
-DEFAULT_MODEL = "claude-opus-5"
+DEFAULT_MODEL = "gemini-3.7-flash"
 MAX_LONG_EDGE = 2576
 MAX_IMAGE_BYTES = 4_500_000
 SPREAD_ASPECT = 1.15

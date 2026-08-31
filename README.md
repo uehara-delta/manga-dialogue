@@ -160,7 +160,7 @@ LLM が改名指示を返し、confidence が `--rename-threshold`（既定 0.8�
 
 | オプション | 既定値 | 説明 |
 |---|---|---|
-| `--model` | claude-opus-5 | 使用するモデル。`claude-*`（Anthropic）または `gemini-*`（Google）。詳細は下記 |
+| `--model` | gemini-3.7-flash | 使用するモデル。`claude-*`（Anthropic）または `gemini-*`（Google）。詳細は下記 |
 | `--run` / `--from-run` | default / – | 結果を保存する run と、台帳のコピー元 run |
 | `--resume` | off | 出力済みのページをスキップして途中から再開 |
 | `--rename-threshold` | 0.8 | この confidence 以上の改名指示を自動適用 |
@@ -179,8 +179,8 @@ uv run manga-dialogue extract "作品名" --resume
 
 | 接頭辞 | プロバイダ | API キー | 例 |
 |---|---|---|---|
-| `claude-` | Anthropic | `ANTHROPIC_API_KEY` | `claude-opus-5`（既定）、`claude-sonnet-5` |
-| `gemini-` | Google Gemini | `GEMINI_API_KEY` | `gemini-3.7-flash` |
+| `claude-` | Anthropic | `ANTHROPIC_API_KEY` | `claude-opus-5`、`claude-sonnet-5` |
+| `gemini-` | Google Gemini | `GEMINI_API_KEY` | `gemini-3.7-flash`（既定） |
 
 Gemini の API キーは https://aistudio.google.com/ の **Get API key** から取得し、`.env` に
 `GEMINI_API_KEY=...` を追記します。モデルを変えて比較するときは run を分けてください。
@@ -208,7 +208,7 @@ uv run manga-dialogue repass "作品名"
 | `--page N` | – | 指定ページだけ再抽出（複数指定可） |
 | `--dry-run` | off | 対象ページの一覧だけ表示（費用なし） |
 | `--volume` | （全巻） | 巻番号。省略すると全巻が対象 |
-| `--model` | claude-opus-5 | 使用するモデル |
+| `--model` | gemini-3.7-flash | 使用するモデル |
 
 対象ページ分の API 費用が再度かかります。先に `--dry-run` で件数を確認してください。
 再抽出したページは JSON に `"repassed": true` が付きます。
@@ -356,6 +356,47 @@ https://www.anthropic.com/pricing を参照してください。まず `--max-pa
 | tmux 内でページ送りが効かない | 上記「tmux を使っている場合の注意」を参照 |
 | `authentication_error` | `ANTHROPIC_API_KEY` が未設定または誤り。`echo $ANTHROPIC_API_KEY` で確認 |
 | `rate_limit_error` | しばらく待って `--resume` で再開 |
+
+## GUI（Flutter）
+
+`gui/` に Flutter 製のデスクトップアプリ（Mac / Windows）があります。設計は `docs/gui-design.md` を参照。
+キャプチャ画像と抽出結果を並べて表示・手動修正し、LLM 呼び出しなどはこのリポジトリの CLI を
+エンジンとして子プロセスで呼び出します。
+
+### 環境構築
+
+Flutter のバージョンは [fvm](https://fvm.app/) で固定しています（`gui/.fvmrc`）。
+
+```bash
+# fvm のインストール（Mac）
+brew tap leoafarias/fvm && brew install fvm
+
+cd gui
+fvm install            # .fvmrc の版（Flutter 3.47.2）を取得
+fvm flutter pub get
+fvm flutter run -d macos     # 開発実行（Windows では -d windows）
+fvm flutter build macos --debug   # ビルドのみ
+```
+
+Windows では fvm を https://fvm.app/documentation/getting-started/installation に従って
+インストールし、Visual Studio の「C++ によるデスクトップ開発」を入れてください。
+
+### 設定
+
+初回起動時にホーム画面で「作品データの場所（works）」を指定します。既定は起動ディレクトリ直下の
+`works/` なので、開発中はこのリポジトリの `works/` を選んでください。設定は `~/.manga_dialogue_gui.json` に
+保存されます。
+
+開発用に `MD_INITIAL_ROUTE` 環境変数で起動時の画面を指定できます。
+
+```bash
+open --env "MD_INITIAL_ROUTE=/edit/作品名/gemini/1?page=6" build/macos/Build/Products/Debug/manga_dialogue_gui.app
+```
+
+### 補足
+
+- macOS の App Sandbox は無効にしています（任意の場所の `works/` を読み書きし、エンジンを子プロセスとして起動するため）
+- 画面収録・アクセシビリティの権限はエンジンではなく GUI アプリに付与します
 
 ## 開発
 
