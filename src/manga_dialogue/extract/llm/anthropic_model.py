@@ -1,6 +1,7 @@
 import base64
 
 import anthropic
+import httpx2 as httpx
 from pydantic import ValidationError
 
 from manga_dialogue.extract.llm.base import ImagePart, ParseError, Part, Refused, TextPart, TransientError, VisionModel
@@ -11,8 +12,11 @@ TRANSIENT_ERRORS = (
     anthropic.OverloadedError,
     anthropic.APIConnectionError,
     anthropic.APITimeoutError,
+    httpx.TransportError,
+    TimeoutError,
 )
 STREAM_THRESHOLD = 16000
+TRANSIENT_STATUS_CODES = {408, 429, 500, 502, 503, 504, 529}
 
 
 class AnthropicModel(VisionModel):
@@ -37,6 +41,10 @@ class AnthropicModel(VisionModel):
                 )
         except TRANSIENT_ERRORS as e:
             raise TransientError(str(e)) from e
+        except anthropic.APIStatusError as e:
+            if e.status_code in TRANSIENT_STATUS_CODES:
+                raise TransientError(str(e)) from e
+            raise
         except ValidationError as e:
             raise ParseError(str(e)) from e
         if response.stop_reason == "refusal":
