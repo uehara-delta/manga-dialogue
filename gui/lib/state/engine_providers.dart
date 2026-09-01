@@ -3,16 +3,21 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../engine/engine_service.dart';
+import '../features/settings/settings.dart';
 import 'providers.dart';
 
+EngineConfig _configFrom(Settings s) => EngineConfig(
+      command: s.engineCommand,
+      workingDir: s.engineWorkingDir ?? '',
+      worksRoot: s.worksRoot,
+      environment: s.environment,
+    );
+
+/// EngineService はアプリで 1 つ。設定が変わってもサービスは作り直さず、
+/// 次回のプロセス起動から新しい設定を使う（作り直すと実行中のジョブ一覧が消える）
 final engineServiceProvider = Provider<EngineService>((ref) {
-  final s = ref.watch(settingsProvider);
-  final service = EngineService(EngineConfig(
-    command: s.engineCommand,
-    workingDir: s.engineWorkingDir ?? '',
-    worksRoot: s.worksRoot,
-    environment: s.environment,
-  ));
+  final service = EngineService(_configFrom(ref.read(settingsProvider)));
+  ref.listen(settingsProvider, (_, s) => service.config = _configFrom(s));
   ref.onDispose(() {
     for (final j in service.jobs) {
       service.cancel(j);

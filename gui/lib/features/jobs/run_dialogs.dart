@@ -9,8 +9,10 @@ import '../../state/engine_providers.dart';
 /// 抽出（extract）の実行ダイアログ
 Future<Job?> showExtractDialog(BuildContext context, WidgetRef ref, {required String title, required List<int> volumes, required List<String> runs, String? defaultRun, String? defaultModel}) async {
   var volume = volumes.isEmpty ? 1 : volumes.first;
-  final run = TextEditingController(text: defaultRun ?? (runs.isEmpty ? 'default' : runs.first));
-  final model = TextEditingController(text: defaultModel ?? 'gemini-3.7-flash');
+  final modelName = defaultModel ?? 'gemini-3.7-flash';
+  // 保存先は「同じモデルで既に抽出した結果」があればそれ、なければモデル名
+  final model = TextEditingController(text: modelName);
+  final run = TextEditingController(text: defaultRun ?? (runs.contains(modelName) ? modelName : modelName));
   var resume = true;
   final ok = await showDialog<bool>(
     context: context,
@@ -28,8 +30,12 @@ Future<Job?> showExtractDialog(BuildContext context, WidgetRef ref, {required St
                 items: [for (final v in (volumes.isEmpty ? [1] : volumes)) DropdownMenuItem(value: v, child: Text('$v'))],
                 onChanged: (v) => setState(() => volume = v ?? volume),
               ),
-              TextField(controller: run, decoration: const InputDecoration(labelText: '抽出データの名前', helperText: '通常は変えなくてよい。別のモデルで比較したいときだけ新しい名前にする')),
-              TextField(controller: model, decoration: const InputDecoration(labelText: 'モデル')),
+              TextField(
+                controller: model,
+                decoration: const InputDecoration(labelText: 'モデル', helperText: 'claude-* または gemini-*'),
+                onChanged: (v) { if (!runs.contains(run.text)) run.text = v.trim(); },
+              ),
+              TextField(controller: run, decoration: const InputDecoration(labelText: '結果の保存先', helperText: '同じ保存先で続けると台帳を引き継ぎます。通常はモデル名のままで構いません')),
               CheckboxListTile(
                 value: resume,
                 contentPadding: EdgeInsets.zero,

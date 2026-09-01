@@ -173,6 +173,7 @@ def _process_page(
         volume=work.volume,
         page=page,
         image=image.name,
+        panels=extraction.panels,
         lines=extraction.lines,
         new_characters=extraction.new_characters,
         renames=extraction.renames,

@@ -125,6 +125,41 @@ def cap_context_confidence(lines: list["Line"]) -> list["Line"]:
     ]
 
 
+MIRROR_TOLERANCE = 0.03
+
+
+def unmirror_x(lines: list["Line"], panels: list[Panel]) -> list["Line"]:
+    """右端から測った x（1 − x）で返された吹き出しを補正する。
+
+    モデルが右→左の読み順と混同して x を鏡像で返すことがある。吹き出しの x が属するコマの
+    矩形の外にあり、1 − x なら中に収まる場合に限って反転する。
+    """
+    by_id = {q.id: q for q in panels}
+    fixed: list[Line] = []
+    for l in lines:
+        q = by_id.get(l.panel)
+        if q is None or l.x is None:
+            fixed.append(l)
+            continue
+        lo, hi = q.x0 - MIRROR_TOLERANCE, q.x1 + MIRROR_TOLERANCE
+        mirrored = 1.0 - l.x
+        if not (lo <= l.x <= hi) and (lo <= mirrored <= hi):
+            fixed.append(l.model_copy(update={"x": round(mirrored, 4)}))
+        else:
+            fixed.append(l)
+    return fixed
+
+
+def arrange(
+    lines: list["Line"], panels: list[Panel], spread: bool = False
+) -> tuple[list["Line"], list[Panel]]:
+    """座標の補正と読み順の決定をまとめて行い、読み順に振り直したコマ矩形も返す"""
+    lines = unmirror_x(lines, panels)
+    ordered = order_panels(panels, spread=spread)
+    renumbered = [q.model_copy(update={"id": i + 1}) for i, q in enumerate(ordered)]
+    return sort_reading_order(lines, panels, spread=spread), renumbered
+
+
 def sort_reading_order(
     lines: list["Line"], panels: list[Panel] | None = None, spread: bool = False
 ) -> list["Line"]:
@@ -206,6 +241,7 @@ class PageResult(BaseModel):
     volume: int = 1
     page: int
     image: str
+    panels: list[Panel] = Field(default_factory=list, description="読み順に番号を振ったコマの矩形")
     lines: list[Line]
     new_characters: list[Character]
     renames: list[Rename] = Field(default_factory=list)

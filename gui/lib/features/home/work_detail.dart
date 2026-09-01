@@ -45,11 +45,16 @@ class _WorkDetailState extends ConsumerState<WorkDetail> {
     ref.read(settingsProvider.notifier).update((s) => s.lastRun[work.title] = r);
   }
 
+  Future<void> _push(String route) async {
+    await context.push(route);
+    if (mounted) ref.read(worksProvider.notifier).refresh();
+  }
+
   void _open(int volume) {
     final r = run;
     if (r == null) return;
     _remember(r);
-    context.push('/edit/${Uri.encodeComponent(work.title)}/$r/$volume');
+    _push('/edit/${Uri.encodeComponent(work.title)}/$r/$volume');
   }
 
   @override
@@ -76,7 +81,7 @@ class _WorkDetailState extends ConsumerState<WorkDetail> {
               itemBuilder: (context) => [
                 const PopupMenuItem(value: 'export', child: Text('エクスポート…')),
                 const PopupMenuDivider(),
-                if (r != null) PopupMenuItem(value: 'delete_run', child: Text('抽出データ「$r」を削除…')),
+                if (r != null) PopupMenuItem(value: 'delete_run', child: Text('抽出結果「$r」を削除…')),
                 const PopupMenuItem(value: 'delete_work', child: Text('この作品を削除…')),
               ],
             ),
@@ -102,7 +107,7 @@ class _WorkDetailState extends ConsumerState<WorkDetail> {
                 onTap: () async {
                   final next = work.volumes.isEmpty ? 1 : work.volumes.last + 1;
                   final job = await showCaptureDialog(context, ref, title: work.title, nextVolume: next);
-                  if (job != null && context.mounted) context.push('/jobs');
+                  if (job != null && context.mounted) _push('/jobs');
                 },
               ),
             ],
@@ -112,7 +117,7 @@ class _WorkDetailState extends ConsumerState<WorkDetail> {
         if (work.runs.length > 1)
           Row(
             children: [
-              const Text('抽出データ: ', style: TextStyle(color: Colors.grey)),
+              const Text('抽出モデル: ', style: TextStyle(color: Colors.grey)),
               DropdownButton<String>(
                 value: r,
                 isDense: true,
@@ -122,7 +127,7 @@ class _WorkDetailState extends ConsumerState<WorkDetail> {
               ),
               const SizedBox(width: 8),
               Tooltip(
-                message: 'モデルや設定を変えて抽出した結果を分けて保持しています。通常はひとつだけです',
+                message: 'モデルごとに抽出結果を分けて保持しています。最近使ったものが先頭です',
                 child: Icon(Icons.info_outline, size: 16, color: scheme.outline),
               ),
             ],
@@ -158,7 +163,7 @@ class _WorkDetailState extends ConsumerState<WorkDetail> {
         spacing: 4,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          TextButton(onPressed: pages == 0 ? null : () => context.push('/captures/${Uri.encodeComponent(work.title)}/$volume'), child: const Text('キャプチャを確認')),
+          TextButton(onPressed: pages == 0 ? null : () => _push('/captures/${Uri.encodeComponent(work.title)}/$volume'), child: const Text('キャプチャを確認')),
           TextButton(
             onPressed: pages == 0 ? null : () async {
               final job = await showExtractDialog(
@@ -168,7 +173,7 @@ class _WorkDetailState extends ConsumerState<WorkDetail> {
               );
               if (job != null && context.mounted) {
                 if (job.run != null) _remember(job.run!);
-                context.push('/jobs');
+                _push('/jobs');
               }
             },
             child: Text(done == 0 ? '抽出' : '再抽出…'),
@@ -213,7 +218,7 @@ class _WorkDetailState extends ConsumerState<WorkDetail> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('エンジンが実行中のため削除できません')));
       return;
     }
-    _confirm('抽出データ「$r」を削除しますか？', 'この抽出データの台帳と全巻の結果を削除します。キャプチャ画像は残ります。元に戻せません。', () => ref.read(workspaceProvider).deleteRun(work.title, r));
+    _confirm('抽出結果「$r」を削除しますか？', 'このモデルの台帳と全巻の抽出結果を削除します。キャプチャ画像は残ります。元に戻せません。', () => ref.read(workspaceProvider).deleteRun(work.title, r));
   }
 
   void _confirmDeleteWork() => _confirm('「${work.title}」を削除しますか？', 'キャプチャ画像・台帳・抽出結果をすべて削除します。元に戻せません。', () => ref.read(workspaceProvider).deleteWork(work.title));

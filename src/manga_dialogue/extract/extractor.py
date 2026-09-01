@@ -6,7 +6,7 @@ from PIL import Image
 from manga_dialogue.extract.characters import CharacterBook
 from manga_dialogue.extract.llm import ImagePart, TextPart, VisionModel
 from manga_dialogue.extract.prompt import SYSTEM_PROMPT, build_user_prompt
-from manga_dialogue.models import PageExtraction, cap_context_confidence, normalize_text, sort_reading_order
+from manga_dialogue.models import PageExtraction, arrange, cap_context_confidence, normalize_text
 
 DEFAULT_MODEL = "gemini-3.7-flash"
 MAX_LONG_EDGE = 2576
@@ -63,9 +63,7 @@ def extract_page(
         extraction = llm.complete(SYSTEM_PROMPT, parts, PageExtraction, max_tokens=EXTRACT_MAX_TOKENS)
     except RuntimeError as e:
         raise ExtractionFailed(f"{image_path.name}: {e}") from e
-    extraction.lines = normalize_text(
-        cap_context_confidence(
-            sort_reading_order(extraction.lines, extraction.panels, spread=is_spread(image_path))
-        )
-    )
+    lines, panels = arrange(extraction.lines, extraction.panels, spread=is_spread(image_path))
+    extraction.lines = normalize_text(cap_context_confidence(lines))
+    extraction.panels = panels
     return extraction

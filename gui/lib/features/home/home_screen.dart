@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../state/engine_providers.dart';
 import '../../state/providers.dart';
 import '../../widgets/app_actions.dart';
 import '../../workspace/workspace.dart';
@@ -21,6 +22,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ジョブが終わったら（実行中の件数が減ったら）作品一覧を再走査する
+    ref.listen(runningJobCountProvider, (prev, next) {
+      if (next < (prev ?? 0)) ref.read(worksProvider.notifier).refresh();
+    });
     final settings = ref.watch(settingsProvider);
     final works = ref.watch(worksProvider);
     final selected = works.where((w) => w.title == _selectedTitle).firstOrNull ?? works.firstOrNull;
@@ -46,7 +51,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     label: const Text('新しい作品をキャプチャ'),
                     onPressed: () async {
                       final job = await showCaptureDialog(context, ref);
-                      if (job != null && context.mounted) context.push('/jobs');
+                      if (job != null && context.mounted) await context.push('/jobs');
+                      ref.read(worksProvider.notifier).refresh();
                     },
                   ),
                 ),

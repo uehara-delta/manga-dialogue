@@ -84,12 +84,17 @@ class Workspace {
     return nums;
   }
 
+  /// run（抽出結果）の一覧。最近更新されたものが先頭
   List<String> listRuns(String title) {
     final dir = Directory(p.join(workDir(title), 'runs'));
     if (!dir.existsSync()) return [];
-    final runs = [for (final d in dir.listSync().whereType<Directory>()) p.basename(d.path)];
-    runs.sort();
-    return runs;
+    final dirs = dir.listSync().whereType<Directory>().toList();
+    DateTime modified(Directory d) {
+      final book = File(p.join(d.path, 'characters.json'));
+      return (book.existsSync() ? book : d).statSync().modified;
+    }
+    dirs.sort((a, b) => modified(b).compareTo(modified(a)));
+    return [for (final d in dirs) p.basename(d.path)];
   }
 
   /// キャプチャ画像のあるページ番号（抽出結果の有無は問わない）
