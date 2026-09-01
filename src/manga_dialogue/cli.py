@@ -457,6 +457,7 @@ def export_cmd(
     fmt: str = typer.Option("csv", "--format", help="csv / tsv / markdown"),
     dest: Path | None = typer.Option(None, "--out", help="出力先ファイル（省略時は works/<作品名>/ 直下）"),
     volume: int | None = typer.Option(None, help="巻番号（省略時は全巻）"),
+    excel: bool = typer.Option(True, "--excel/--no-excel", help="CSV / TSV を BOM 付き UTF-8 で書く（Excel で文字化けしない）"),
     run: str = typer.Option(DEFAULT_RUN, help="結果を保存する run 名（モデルごとに分けるなど）"),
     root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
 ) -> None:
@@ -465,7 +466,7 @@ def export_cmd(
         reporter.error(f"未対応の形式: {fmt}（csv / tsv / markdown）")
         raise typer.Exit(1)
     work = Work(title, root, run=run)
-    path, rows = export(work, fmt, dest, volume)
+    path, rows = export(work, fmt, dest, volume, excel=excel)
     reporter.event("done", f"書き出し: {path} ({rows} 行)", path=str(path), rows=rows)
 
 

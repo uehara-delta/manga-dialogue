@@ -73,7 +73,7 @@ class _WorkDetailState extends ConsumerState<WorkDetail> {
             PopupMenuButton<String>(
               tooltip: 'その他',
               onSelected: (v) => switch (v) {
-                'export' => r == null ? null : showExportDialog(context, ref, title: work.title, run: r),
+                'export' => r == null ? null : showExportDialog(context, ref, title: work.title, run: r, volumes: work.volumes),
                 'delete_run' => _confirmDeleteRun(),
                 'delete_work' => _confirmDeleteWork(),
                 _ => null,
@@ -181,8 +181,15 @@ class _WorkDetailState extends ConsumerState<WorkDetail> {
           FilledButton(onPressed: done == 0 ? null : () => _open(volume), child: const Text('開く')),
           PopupMenuButton<String>(
             tooltip: 'この巻の操作',
-            onSelected: (v) => switch (v) { 'delete' => _confirmDeleteVolume(volume), _ => null },
-            itemBuilder: (context) => const [PopupMenuItem(value: 'delete', child: Text('この巻を削除…'))],
+            onSelected: (v) => switch (v) {
+              'export' => r == null ? null : showExportDialog(context, ref, title: work.title, run: r, volumes: work.volumes, defaultVolume: volume),
+              'delete' => _confirmDeleteVolume(volume),
+              _ => null,
+            },
+            itemBuilder: (context) => [
+              if (done > 0) const PopupMenuItem(value: 'export', child: Text('この巻をエクスポート…')),
+              const PopupMenuItem(value: 'delete', child: Text('この巻を削除…')),
+            ],
           ),
         ],
       ),

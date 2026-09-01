@@ -286,6 +286,8 @@ uv run manga-dialogue export "作品名" --format markdown --out ~/Desktop/dialo
 ```
 
 列: `volume, page, panel, speaker, text, confidence, basis, manual`。Markdown はページごとの見出し付きです。
+CSV / TSV は既定で BOM 付き UTF-8（Excel でそのまま開けます）。プログラムで読む場合など BOM が不要なら
+`--no-excel` を付けてください。
 
 ### 手動修正の保護（manual）
 

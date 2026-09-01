@@ -162,7 +162,7 @@ class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
                 tooltip: 'エクスポート',
                 icon: const Icon(Icons.download_outlined),
                 onPressed: () async {
-                  final job = await showExportDialog(context, ref, title: widget.title, run: widget.run);
+                  final job = await showExportDialog(context, ref, title: widget.title, run: widget.run, volumes: ws.listVolumes(widget.title), defaultVolume: widget.volume);
                   if (job != null) _watchJob(job);
                 },
               ),

@@ -60,23 +60,56 @@ Future<Job?> showExtractDialog(BuildContext context, WidgetRef ref, {required St
   );
 }
 
-/// エクスポートの実行ダイアログ
-Future<Job?> showExportDialog(BuildContext context, WidgetRef ref, {required String title, required String run}) async {
+/// エクスポートの実行ダイアログ。巻ごと、または全巻を書き出す。
+Future<Job?> showExportDialog(
+  BuildContext context, WidgetRef ref, {
+  required String title,
+  required String run,
+  List<int> volumes = const [],
+  int? defaultVolume,
+}) async {
   var format = 'csv';
+  int? volume = defaultVolume;
+  var excel = true;
   final ok = await showDialog<bool>(
     context: context,
     builder: (context) => StatefulBuilder(
       builder: (context, setState) => AlertDialog(
-        title: Text('エクスポート: $title ($run)'),
-        content: DropdownButtonFormField<String>(
-          initialValue: format,
-          decoration: const InputDecoration(labelText: '形式'),
-          items: const [
-            DropdownMenuItem(value: 'csv', child: Text('CSV')),
-            DropdownMenuItem(value: 'tsv', child: Text('TSV')),
-            DropdownMenuItem(value: 'markdown', child: Text('Markdown')),
-          ],
-          onChanged: (v) => setState(() => format = v ?? format),
+        title: Text('エクスポート: $title'),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<int?>(
+                initialValue: volume,
+                decoration: const InputDecoration(labelText: '巻'),
+                items: [
+                  for (final v in volumes) DropdownMenuItem(value: v, child: Text('$v巻')),
+                  const DropdownMenuItem(value: null, child: Text('全巻をまとめて')),
+                ],
+                onChanged: (v) => setState(() => volume = v),
+              ),
+              DropdownButtonFormField<String>(
+                initialValue: format,
+                decoration: const InputDecoration(labelText: '形式'),
+                items: const [
+                  DropdownMenuItem(value: 'csv', child: Text('CSV')),
+                  DropdownMenuItem(value: 'tsv', child: Text('TSV')),
+                  DropdownMenuItem(value: 'markdown', child: Text('Markdown')),
+                ],
+                onChanged: (v) => setState(() => format = v ?? format),
+              ),
+              if (format != 'markdown')
+                CheckboxListTile(
+                  value: excel,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Excel に対応した形式（BOM 付き UTF-8）'),
+                  subtitle: const Text('Excel で開いても文字化けしません。プログラムで読む場合はオフに', style: TextStyle(fontSize: 11)),
+                  onChanged: (v) => setState(() => excel = v ?? true),
+                ),
+            ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('キャンセル')),
@@ -89,9 +122,10 @@ Future<Job?> showExportDialog(BuildContext context, WidgetRef ref, {required Str
   final ext = {'csv': 'csv', 'tsv': 'tsv', 'markdown': 'md'}[format]!;
   final dir = await FilePicker.getDirectoryPath(dialogTitle: '書き出し先フォルダ');
   if (dir == null) return null;
-  final path = p.join(dir, '${title}_$run.$ext');
+  final suffix = volume == null ? '' : '_${volume.toString().padLeft(2, '0')}';
+  final path = p.join(dir, '$title$suffix.$ext');
   return ref.read(jobsProvider.notifier).start(
-    ['export', title, '--run', run, '--format', format, '--out', path],
-    label: 'エクスポート: $title ($run) → $path',
+    ['export', title, '--run', run, '--format', format, '--out', path, if (volume != null) ...['--volume', '$volume'], if (!excel) '--no-excel'],
+    label: 'エクスポート: $title${volume == null ? ' 全巻' : ' $volume巻'} → $path',
   );
 }

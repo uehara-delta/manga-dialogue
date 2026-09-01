@@ -52,13 +52,18 @@ def render(rows: list[dict], fmt: str, title: str) -> str:
     raise ValueError(f"未対応の形式: {fmt}")
 
 
-def export(work: Work, fmt: str, dest: Path | None = None, volume: int | None = None) -> tuple[Path, int]:
-    """書き出したファイルパスと行数を返す"""
+def export(work: Work, fmt: str, dest: Path | None = None, volume: int | None = None, excel: bool = True) -> tuple[Path, int]:
+    """書き出したファイルパスと行数を返す。
+
+    excel=True のとき CSV / TSV は BOM 付き UTF-8 で書く（Excel がそのまま開ける）。
+    Markdown は常に BOM なし。
+    """
     rows = collect_rows(work, volume)
     suffix = FORMATS[fmt]
     if dest is None:
         name = work.title if volume is None else f"{work.title}_{volume:02d}"
         dest = work.dir / f"{name}{suffix}"
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(render(rows, fmt, work.title), encoding="utf-8")
+    encoding = "utf-8-sig" if excel and fmt in ("csv", "tsv") else "utf-8"
+    dest.write_text(render(rows, fmt, work.title), encoding=encoding)
     return dest, len(rows)
