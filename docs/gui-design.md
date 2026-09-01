@@ -1,7 +1,7 @@
 # manga-dialogue GUI 設計
 
 Flutter 製デスクトップアプリ（Mac / Windows）と Python エンジン（既存 CLI）を組み合わせ、
-キャプチャ画像と抽出結果を並べて確認・修正し、AI による一括修正とエクスポートを行う。
+キャプチャ画像と抽出結果を並べて確認・修正し、エクスポートを行う。
 
 ## 1. 目的とスコープ
 
@@ -10,14 +10,14 @@ Flutter 製デスクトップアプリ（Mac / Windows）と Python エンジン
 - セリフの手動修正（話者・本文・コマ番号・順序・追加・削除）。修正した行に `manual` を付ける
 - キャラ台帳の閲覧・編集（名前・別名・外見）と統合（rename）
 - 保留中の改名候補（`pending_renames.jsonl`）のレビューと承認
-- エンジン実行: capture / extract / repass / consolidate / fix / export を GUI から起動し、進捗を表示
-- AI 一括修正（fix）: 指示文 → 変更案のプレビュー → 適用
+- エンジン実行: capture / extract / repass / consolidate / export を GUI から起動し、進捗を表示
 - エクスポート（CSV / TSV / Markdown）
 - 容量管理: 巻・run 単位でのキャプチャ画像や抽出結果の一括削除、使用容量の表示
 
 ### やらないこと（当面）
 - 台帳や出力のクラウド同期、複数ユーザー
 - GUI からのプロンプト編集（プロンプトはエンジン側の資産として扱う）
+- AI 一括修正（`fix`）の GUI。使い所が限られるため CLI のみとする
 - Kindle の操作 UI（キャプチャの開始・停止と結果確認のみ）
 - Windows 版の Kindle ドライバ（Mac で先行し、Windows はキャプチャ以外の機能から）
 
@@ -137,10 +137,8 @@ Flutter 製デスクトップアプリ（Mac / Windows）と Python エンジン
 - `page` イベントで進捗を更新。失敗ページ一覧、キャンセルボタン
 - 完了後に対象 run を再読込
 
-### 5.5 AI 一括修正（fix）ダイアログ
-1. 範囲（巻・ページ・「このページのみ」）と指示文、画像添付の有無を入力
-2. エンジンで `fix` を実行し、`change` イベントを表で表示（before / after、理由）
-3. チェックした変更だけを適用（`fix --apply-from`）
+### 5.5 AI 一括修正（fix）
+（GUI からは外した。CLI の `fix` / `fix --apply-from` のみ）
 
 ### 5.6 キャプチャ
 - 作品名・巻・ページ送りキー・待機秒数・最大枚数を指定して `capture` を実行
@@ -191,7 +189,7 @@ gui/                          # Flutter プロジェクト（リポジトリ内�
 |---|---|---|
 | M1 | 閲覧・手動修正・台帳編集（エンジンなしで動く） | なし |
 | M2 | ジョブ実行（extract / repass / export / capture）、進捗表示、ロック | `info`、run ロック、usage 記録 |
-| M3 | 保留改名レビュー、consolidate、fix（選択適用） | `fix --apply-from` |
+| M3 | 保留改名レビュー、consolidate | （`fix --apply-from` は CLI 向けに実装） |
 | M4 | 配布（PyInstaller + GitHub Actions、エンジン同梱） | ビルド設定 |
 
 M1 は既存の抽出データ（`works/` 配下の run）だけで開発・検証できる。
