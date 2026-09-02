@@ -5,7 +5,8 @@
 
 ## 方針
 - 言語: Python 3.12 / パッケージ管理: uv
-- 開発環境は Mac（Kindle for Mac で動作確認）、最終ターゲットは Windows（Kindle for PC）
+- 開発環境は Mac（Kindle for Mac で動作確認）と Windows。Windows の対象は Microsoft Store 版
+  「Amazon Kindle: Reading App」（旧 Kindle for PC は 2026-06-30 に無効化済み）
 - OS依存コードはキャプチャ層のみに閉じ込める。他の層はOS非依存を厳守
 - DRM解除や FLAG_SECURE 回避は一切行わない。表示画面のキャプチャのみ
 - まずCLIで1巻通すことを最優先。GUIは後回し

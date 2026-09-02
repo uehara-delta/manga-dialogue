@@ -7,6 +7,7 @@ from typing import Callable
 import mss
 from PIL import Image, ImageChops
 
+from manga_dialogue.capture.trim import trim as trim_image
 from manga_dialogue.workspace import Work
 
 
@@ -54,10 +55,12 @@ class CaptureDriver(ABC):
         key: str,
         start: int = 1,
         on_page: Callable[[int], None] | None = None,
+        trim: bool = True,
     ) -> int:
         """ページ送りしながら保存し、保存したページ数を返す。
 
         ページ送り後に画像が変化しなかった時点で最終ページとみなして終了する。
+        trim=True ならアプリの枠と余白を切り落として保存する（最終ページ判定は切り落とす前の画像で行う）。
         """
         work.ensure_dirs()
         self.activate()
@@ -73,7 +76,7 @@ class CaptureDriver(ABC):
             img = self.capture(rect)
             if prev is not None and _same_image(prev, img):
                 break
-            img.save(work.capture_path(page))
+            (trim_image(img)[0] if trim else img).save(work.capture_path(page))
             saved += 1
             if on_page:
                 on_page(page)

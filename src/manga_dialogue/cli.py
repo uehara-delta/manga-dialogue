@@ -118,10 +118,11 @@ def capture(
     title: str = typer.Argument(help="作品名（works/<title>/ に保存）"),
     max_pages: int = typer.Option(300, help="最大キャプチャページ数"),
     delay: float = typer.Option(1.0, help="ページ送り後の待機秒数"),
-    key: str = typer.Option("space", help="ページ送りキー: space / left / right"),
+    key: str = typer.Option("space", help="ページ送りキー: space / left / right（Windows の Kindle はスペースで送れないため space は left として扱う）"),
     start: int = typer.Option(1, help="開始ページ番号（ファイル名に使用）"),
     volume: int = typer.Option(1, help="巻番号"),
     root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
+    trim: bool = typer.Option(True, help="Kindle アプリの枠と余白を切り落として保存する"),
 ) -> None:
     """Kindle を前面化し、ページ送りしながらスクリーンショットを保存する"""
     from manga_dialogue.capture.base import get_driver
@@ -137,11 +138,62 @@ def capture(
             key=key,
             start=start,
             on_page=lambda p: reporter.event("page", f"  page {p:04d}", volume=volume, page=p),
+            trim=trim,
         )
     except RuntimeError as e:
         reporter.error(str(e))
         raise typer.Exit(1)
     reporter.event("done", f"完了: {saved} ページ保存", saved=saved)
+
+
+@app.command()
+def trim(
+    title: str = typer.Argument(help="作品名"),
+    volume: int | None = typer.Option(None, help="巻番号。省略すると全巻"),
+    root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="切り落とす範囲を表示するだけ"),
+) -> None:
+    """撮影済みのキャプチャから Kindle アプリの枠と余白を切り落とし、全 run の抽出結果の座標も合わせて変換する"""
+    from PIL import Image
+
+    from manga_dialogue.capture.trim import find_content_box, remap
+
+    base = Work(title, root)
+    works = base.all_volumes() if volume is None else [base.with_volume(volume)]
+    trimmed = 0
+    for work in works:
+        for image_path in work.capture_images():
+            with Image.open(image_path) as img:
+                w, h = img.size
+                box = find_content_box(img)
+                if box is None or box == (0, 0, w, h):
+                    continue
+                left, top, right, bottom = box
+                reporter.event(
+                    "page", f"  {work.volume}巻 {image_path.name}: ({w}x{h}) → ({right - left}x{bottom - top}) 上 {top} 左 {left} 右 {w - right} 下 {h - bottom}",
+                    volume=work.volume, page=int(image_path.stem), width=w, height=h, box=list(box),
+                )
+                if dry_run:
+                    trimmed += 1
+                    continue
+                cropped = img.crop(box)
+            cropped.save(image_path)
+            trimmed += 1
+            for run in base.all_runs():
+                out = Work(title, root, work.volume, run).output_path(int(image_path.stem))
+                if not out.exists():
+                    continue
+                result = PageResult.model_validate_json(out.read_text(encoding="utf-8"))
+                for line in result.lines:
+                    if line.x is not None:
+                        line.x = remap(line.x, left, right, w)
+                    if line.y is not None:
+                        line.y = remap(line.y, top, bottom, h)
+                for q in result.panels:
+                    q.x0, q.x1 = remap(q.x0, left, right, w), remap(q.x1, left, right, w)
+                    q.y0, q.y1 = remap(q.y0, top, bottom, h), remap(q.y1, top, bottom, h)
+                out.write_text(json.dumps(result.model_dump(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    reporter.event("done", f"{'対象' if dry_run else '切り落とし'}: {trimmed} ページ", trimmed=trimmed, dry_run=dry_run)
 
 
 def _get_model(model: str) -> VisionModel:

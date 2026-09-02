@@ -1,6 +1,6 @@
 # manga-dialogue
 
-Kindle for Mac / Kindle for PC に表示した漫画の画面を自動でキャプチャし、
+Kindle for Mac / Kindle for Windows に表示した漫画の画面を自動でキャプチャし、
 Anthropic API（Claude）で「キャラ名＋セリフ」形式に文字起こしする個人用ツールです。
 
 - DRM 解除や画面保護の回避は一切行いません。表示されている画面を撮影するだけです
@@ -10,7 +10,9 @@ Anthropic API（Claude）で「キャラ名＋セリフ」形式に文字起こ�
 
 - Python 3.12 以上（`uv` が自動で取得します）
 - [uv](https://docs.astral.sh/uv/)
-- Mac: Kindle for Mac（Windows 版は現在スタブのみで未対応）
+- Mac: Kindle for Mac
+- Windows: Microsoft Store 版 [Amazon Kindle: Reading App](https://apps.microsoft.com/detail/9p8jq0jjstll)
+  （旧 Kindle for PC は 2026-06-30 に無効化されたため使えません）
 
 ## セットアップ
 
@@ -79,6 +81,9 @@ export ANTHROPIC_API_KEY="sk-ant-api03-..."
 
 許可後はターミナルを再起動してください。
 
+**Windows の場合**: 特別な権限設定は不要です。Store 版 Kindle のウィンドウを Win32 API で検出・前面化し、
+`PrintWindow` でそのウィンドウだけを撮影します（他のウィンドウが重なっていても写りません）。
+
 **tmux を使っている場合の注意**: tmux サーバーはターミナルから切り離されて動くため、
 macOS は権限の主体を iTerm 等ではなく `tmux` 自身として扱います。iTerm に許可を与えても
 tmux 内からは効きません。**tmux を使わない素のターミナルタブで実行**するのが最も簡単です。
@@ -114,7 +119,8 @@ works/<作品名>/
 
 ### Step 1: キャプチャ
 
-1. Kindle for Mac で対象の本を開き、**1ページ目を表示**した状態にする
+1. Kindle で対象の本を開き、**1ページ目を表示**した状態にする。Windows ではウィンドウを最大化しておくと
+   解像度が上がり抽出精度が良くなります
 2. 以下を実行する
 
 ```bash
@@ -129,10 +135,11 @@ Kindle が自動で前面化され、スペースキーでページ送りしな�
 |---|---|---|
 | `--max-pages` | 300 | 最大ページ数（安全装置） |
 | `--delay` | 1.0 | ページ送り後の待機秒数。描画が間に合わない場合は増やす |
-| `--key` | space | ページ送りキー。`left` / `right` も指定可 |
+| `--key` | space | ページ送りキー。`left` / `right` も指定可。Windows の Kindle はスペースで送れないので `space` は `left`（右→左読みの次ページ）として扱う |
 | `--start` | 1 | ファイル名の開始番号。途中から撮り直すときに使う |
 | `--volume` | 1 | 巻番号 |
 | `--root` | works | 作品ルートディレクトリ |
+| `--trim/--no-trim` | trim | Kindle アプリの枠（上部のタイトルバー）と背景色だけの余白を切り落として保存する |
 
 例: 描画が遅いので 2 秒待ち、←キーで送る
 
@@ -140,7 +147,15 @@ Kindle が自動で前面化され、スペースキーでページ送りしな�
 uv run manga-dialogue capture "作品名" --delay 2 --key left
 ```
 
-撮影後、`works/作品名/captures/` の画像を確認し、白紙や重複があれば削除してから次へ進んでください。
+撮影後、`works/作品名/volumes/01/captures/` の画像を確認し、白紙や重複があれば削除してから次へ進んでください。
+
+すでに `--no-trim` 相当で撮影した巻は、後から `trim` で切り落とせます。抽出済みの JSON がある場合は
+吹き出し・コマの座標も切り抜きに合わせて変換されるので、再抽出は不要です。
+
+```bash
+uv run manga-dialogue trim "作品名" --dry-run     # 切り落とす範囲を表示
+uv run manga-dialogue trim "作品名" --volume 1    # 実行（画像を上書きします）
+```
 
 ### Step 2: セリフ抽出
 
@@ -372,9 +387,10 @@ https://www.anthropic.com/pricing を参照してください。まず `--max-pa
 |---|---|
 | `Kindle のウィンドウが見つかりません` | Kindle で本を開いているか確認。ウィンドウが最小化されていないか確認 |
 | 撮影画像が真っ黒 | 「画面収録」の許可がない。許可後にターミナルを再起動 |
-| ページが送られない | 「アクセシビリティ」の許可がない、または `--key left` を試す |
+| ページが送られない | Mac: 「アクセシビリティ」の許可がない、または `--key left` を試す。Windows: Kindle のウィンドウをクリックして本が表示されているか確認 |
 | 同じページが 2 枚続けて保存される | `--delay` を増やす（描画が間に合っていない） |
 | 1 枚目で即終了する | Kindle が前面化に失敗している。手動で前面にしてから再実行 |
+| Windows で `Kindle が起動していません` | Store 版 Kindle（`Kindle.exe`）で本を開いているか確認。旧 Kindle for PC は対象外 |
 | 画像が壁紙や別ウィンドウになる | ステージマネージャーで Kindle が非アクティブ。一度 Kindle をクリックしてから再実行 |
 | tmux 内でページ送りが効かない | 上記「tmux を使っている場合の注意」を参照 |
 | `authentication_error` | `ANTHROPIC_API_KEY` が未設定または誤り。`echo $ANTHROPIC_API_KEY` で確認 |
@@ -406,13 +422,15 @@ Windows では fvm を https://fvm.app/documentation/getting-started/installatio
 
 ### 設定
 
-初回起動時にホーム画面で「作品データの場所（works）」を指定します。既定は起動ディレクトリ直下の
-`works/` なので、開発中はこのリポジトリの `works/` を選んでください。設定は `~/.manga_dialogue_gui.json` に
+作品データの場所（works）はホーム画面で変更できます。開発中（`flutter run` で起動）は、`gui/` から起動しても
+`pyproject.toml` のあるリポジトリ直下を自動検出し、その `works/` を既定にします。設定は `~/.manga_dialogue_gui.json` に
 保存されます。
 
-設定画面（右上の歯車）でエンジンの起動コマンドと作業ディレクトリを指定し、「接続確認」で
+設定画面（右上の歯車）の「文字の大きさ」で表示全体の文字サイズを変えられます（高解像度ディスプレイで小さく感じる場合に）。
+同じ画面でエンジンの起動コマンドと作業ディレクトリを指定し、「接続確認」で
 `manga-dialogue info` の応答（バージョン、既定モデル、API キーの有無）を確認できます。
-開発中の既定は `uv run --env-file .env manga-dialogue`（作業ディレクトリ = このリポジトリ）です。
+開発中の既定は `uv run --env-file .env manga-dialogue` で、作業ディレクトリが空欄ならリポジトリ直下を自動検出します
+（`.env` と `pyproject.toml` はそこから読まれます）。
 API キーは設定画面の「API キー」に入力するとエンジンに環境変数として渡されます（配布版はこちらを使います。
 `~/.manga_dialogue_gui.json` に平文で保存される点に注意）。空欄なら `.env` や環境変数の値が使われます。
 
@@ -426,6 +444,7 @@ API キーは設定画面の「API キー」に入力するとエンジンに環
 - 「抽出モデル」はモデルごとの抽出結果（run）の切替です。最近使ったものが先頭で、通常はひとつだけです
 
 ページ編集画面でできること:
+- 画像とセリフ一覧の境界、セリフ一覧と台帳パネルの境界はドラッグで幅・高さを変えられます（位置は記憶されます）
 - 行の編集（話者はインクリメンタル検索付き、本文・コマ番号・順序・追加・削除）、ページの確定、⌘Z で元に戻す
 - ← / → でページ送り（右→左の読み方向。← が次のページ）、巻の切替、M で番号マーカーの表示切替（カーソル付近のマーカーは自動で隠れます）
 - このページの再抽出、エクスポート
