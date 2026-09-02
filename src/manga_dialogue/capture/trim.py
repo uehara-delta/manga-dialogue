@@ -1,6 +1,7 @@
 """キャプチャ画像から Kindle アプリの枠と余白を切り落とす（OS 非依存の画像処理）。
 
-- 背景色は左下隅の画素から決める（ライト／ダークテーマの両方に対応）
+- 背景色は左下隅の少し内側の画素から決める（ライト／ダークテーマの両方に対応。
+  Mac のウィンドウキャプチャは四隅が角丸で暗い画素になるため、隅そのものは使わない）
 - 上端のタイトルバー: 画面の上部 TITLE_SCAN_RATIO の範囲で、背景でない画素が左右の端
   （EDGE_RATIO ずつ）にしかない行を「アプリの枠」とみなして落とす。ページ本体は中央にあるので、
   中央に背景でない画素が現れた行から下を残す
@@ -12,6 +13,7 @@
 from PIL import Image, ImageChops
 
 BG_TOLERANCE = 24
+BG_INSET = 8
 TITLE_SCAN_RATIO = 0.08
 EDGE_RATIO = 0.2
 GAP_RATIO = 0.05
@@ -25,7 +27,8 @@ def _foreground_mask(img: Image.Image) -> Image.Image:
     """背景色と十分に異なる画素を 255、それ以外を 0 にした L 画像"""
     rgb = img.convert("RGB")
     w, h = rgb.size
-    bg = Image.new("RGB", rgb.size, rgb.getpixel((0, h - 1)))
+    inset = min(BG_INSET, w - 1, h - 1)
+    bg = Image.new("RGB", rgb.size, rgb.getpixel((inset, h - 1 - inset)))
     r, g, b = ImageChops.difference(rgb, bg).split()
     diff = ImageChops.lighter(ImageChops.lighter(r, g), b)
     return diff.point(lambda v: 255 if v > BG_TOLERANCE else 0)
