@@ -32,7 +32,7 @@ Future<Job?> showExtractDialog(BuildContext context, WidgetRef ref, {required St
               ),
               TextField(
                 controller: model,
-                decoration: const InputDecoration(labelText: 'モデル', helperText: 'claude-* または gemini-*'),
+                decoration: const InputDecoration(labelText: 'モデル', helperText: 'gemini-* / claude-* / gpt-*'),
                 onChanged: (v) { if (!runs.contains(run.text)) run.text = v.trim(); },
               ),
               TextField(controller: run, decoration: const InputDecoration(labelText: '結果の保存先', helperText: '同じ保存先で続けると台帳を引き継ぎます。通常はモデル名のままで構いません')),

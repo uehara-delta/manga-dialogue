@@ -16,7 +16,7 @@ from manga_dialogue.extract.characters import CharacterBook
 from manga_dialogue.extract.consolidate import propose_consolidation
 from manga_dialogue.extract.extractor import DEFAULT_MODEL, ExtractionFailed, extract_page
 from manga_dialogue.extract.llm import VisionModel, get_model
-from manga_dialogue.extract.llm import PROVIDER_PREFIXES
+from manga_dialogue.extract.llm import PROVIDER_DEFAULT_MODELS, PROVIDER_PREFIXES
 from manga_dialogue.extract.fix import FixPlan, apply_changes, load_pages, propose_fix
 from manga_dialogue.extract.pending import PendingRename, PendingStore
 from manga_dialogue.extract.renames import apply_rename, record_pending
@@ -104,8 +104,9 @@ def info(root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレ�
         "platform": sys.platform,
         "default_model": DEFAULT_MODEL,
         "providers": {
-            "anthropic": {"prefix": "claude-", "api_key": bool(os.environ.get("ANTHROPIC_API_KEY"))},
-            "gemini": {"prefix": "gemini-", "api_key": bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))},
+            "anthropic": {"prefix": "claude-", "api_key": bool(os.environ.get("ANTHROPIC_API_KEY")), "default_model": PROVIDER_DEFAULT_MODELS["anthropic"]},
+            "gemini": {"prefix": "gemini-", "api_key": bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")), "default_model": PROVIDER_DEFAULT_MODELS["gemini"]},
+            "openai": {"prefix": "gpt-", "api_key": bool(os.environ.get("OPENAI_API_KEY")), "default_model": PROVIDER_DEFAULT_MODELS["openai"]},
         },
         "root": str(root.resolve()),
         "root_exists": root.exists(),

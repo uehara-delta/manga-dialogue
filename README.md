@@ -194,11 +194,12 @@ uv run manga-dialogue extract "作品名" --resume
 
 | 接頭辞 | プロバイダ | API キー | 例 |
 |---|---|---|---|
-| `claude-` | Anthropic | `ANTHROPIC_API_KEY` | `claude-opus-5`、`claude-sonnet-5` |
+| `claude-` | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-5`（既定候補）、上位の `claude-opus-5` |
 | `gemini-` | Google Gemini | `GEMINI_API_KEY` | `gemini-3.7-flash`（既定） |
+| `gpt-` | OpenAI | `OPENAI_API_KEY` | `gpt-5.6-luna`（既定候補）、中位の `gpt-5.6-terra`、上位の `gpt-5.6-sol` |
 
-Gemini の API キーは https://aistudio.google.com/ の **Get API key** から取得し、`.env` に
-`GEMINI_API_KEY=...` を追記します。モデルを変えて比較するときは run を分けてください。
+Gemini の API キーは https://aistudio.google.com/ の **Get API key** から、OpenAI のキーは
+https://platform.openai.com/api-keys から取得し、`.env` に `GEMINI_API_KEY=...` / `OPENAI_API_KEY=...` を追記します。モデルを変えて比較するときは run を分けてください。
 
 ```bash
 uv run --env-file .env manga-dialogue extract "作品名" --model gemini-3.7-flash --run gemini --from-run default

@@ -18,6 +18,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late final _workingDir = TextEditingController(text: ref.read(settingsProvider).engineWorkingDir ?? '');
   late final _anthropicKey = TextEditingController(text: ref.read(settingsProvider).apiKeys['ANTHROPIC_API_KEY'] ?? '');
   late final _geminiKey = TextEditingController(text: ref.read(settingsProvider).apiKeys['GEMINI_API_KEY'] ?? '');
+  late final _openaiKey = TextEditingController(text: ref.read(settingsProvider).apiKeys['OPENAI_API_KEY'] ?? '');
   Map<String, dynamic>? _info;
   bool _checking = false;
 
@@ -98,6 +99,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           TextField(controller: _geminiKey, obscureText: true, decoration: const InputDecoration(labelText: 'GEMINI_API_KEY')),
           const SizedBox(height: 8),
           TextField(controller: _anthropicKey, obscureText: true, decoration: const InputDecoration(labelText: 'ANTHROPIC_API_KEY')),
+          const SizedBox(height: 8),
+          TextField(controller: _openaiKey, obscureText: true, decoration: const InputDecoration(labelText: 'OPENAI_API_KEY')),
           const SizedBox(height: 16),
           Row(
             children: [
@@ -106,7 +109,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ref.read(settingsProvider.notifier).update((s) {
                     s.engineCommand = _command.text.trim();
                     s.engineWorkingDir = _workingDir.text.trim().isEmpty ? null : _workingDir.text.trim();
-                    s.apiKeys = {'GEMINI_API_KEY': _geminiKey.text.trim(), 'ANTHROPIC_API_KEY': _anthropicKey.text.trim()};
+                    s.apiKeys = {'GEMINI_API_KEY': _geminiKey.text.trim(), 'ANTHROPIC_API_KEY': _anthropicKey.text.trim(), 'OPENAI_API_KEY': _openaiKey.text.trim()};
                   });
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('保存しました')));
                 },
