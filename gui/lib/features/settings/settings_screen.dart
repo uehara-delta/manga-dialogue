@@ -32,6 +32,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [
+          Text('表示', style: Theme.of(context).textTheme.titleMedium),
+          Row(
+            children: [
+              const Text('文字の大きさ'),
+              Expanded(
+                child: Slider(
+                  value: settings.uiScale,
+                  min: 0.8,
+                  max: 1.8,
+                  divisions: 10,
+                  label: '${(settings.uiScale * 100).round()}%',
+                  onChanged: (v) => ref.read(settingsProvider.notifier).update((s) => s.uiScale = (v * 10).round() / 10),
+                ),
+              ),
+              SizedBox(width: 48, child: Text('${(settings.uiScale * 100).round()}%', textAlign: TextAlign.end)),
+            ],
+          ),
+          const SizedBox(height: 24),
           Text('作品データ', style: Theme.of(context).textTheme.titleMedium),
           ListTile(
             contentPadding: EdgeInsets.zero,
@@ -61,7 +79,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             controller: _workingDir,
             decoration: InputDecoration(
               labelText: '作業ディレクトリ',
-              helperText: 'uv run の場合はリポジトリのパス',
+              helperText: 'uv run の場合はリポジトリのパス（空欄なら pyproject.toml のあるリポジトリを自動検出）',
               suffixIcon: IconButton(
                 icon: const Icon(Icons.folder_open),
                 onPressed: () async {

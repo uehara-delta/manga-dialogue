@@ -9,6 +9,7 @@ import '../../state/engine_providers.dart';
 import '../../state/providers.dart';
 import '../../workspace/workspace.dart';
 import '../../widgets/app_actions.dart';
+import '../../widgets/split_pane.dart';
 import '../characters/characters_panel.dart';
 import '../jobs/run_dialogs.dart';
 import 'line_list.dart';
@@ -28,6 +29,14 @@ class PageEditorScreen extends ConsumerStatefulWidget {
 class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
   bool _showCharacters = false;
   bool _showMarkers = true;
+
+  /// 分割位置。ドラッグ中はローカルに持ち、離したときに設定へ保存する
+  static const _splitKey = 'editor.split';
+  static const _charactersKey = 'editor.characters';
+  double? _split;
+  double? _charactersSplit;
+
+  void _saveLayout(String key, double v) => ref.read(settingsProvider.notifier).update((s) => s.layout[key] = v);
 
   /// ジョブが終わったら現在のページと台帳を読み直す
   void _watchJob(Job job) {
@@ -67,9 +76,24 @@ class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
     final characters = ref.watch(charactersProvider);
     final speakers = [for (final n in specialSpeakers) SpeakerOption(n), for (final c in characters) SpeakerOption(c.name, c.aliases)];
     final locked = ws.isLocked(widget.title, widget.run);
-
     if (s == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    final layout = ref.watch(settingsProvider.select((st) => st.layout));
     final r = s.result;
+    final lineList = r == null
+        ? const SizedBox.shrink()
+        : AbsorbPointer(
+            absorbing: locked,
+            child: LineList(
+              lines: r.lines,
+              selected: s.selected,
+              speakers: speakers,
+              onSelect: n.select,
+              onSpeaker: (i, v) => n.editLine(i, (l) => l.speaker = v),
+              onText: (i, v) => n.editLine(i, (l) => l.text = v),
+              onPanel: (i, v) => n.editLine(i, (l) => l.panel = v),
+              onDelete: n.removeLine,
+            ),
+          );
 
     return CallbackShortcuts(
       bindings: {
@@ -158,51 +182,43 @@ class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
               const AppActions(),
             ],
           ),
-          body: Row(
-            children: [
-              Expanded(
-                flex: 5,
-                child: PageImage(
-                  path: ws.capturePath(s.ref),
-                  lines: r?.lines ?? const [],
-                  selected: s.selected,
-                  showMarkers: _showMarkers,
-                  onSelect: n.select,
-                  onTapEmpty: (x, y) => locked ? null : n.addLine(x: x, y: y),
-                ),
-              ),
-              const VerticalDivider(width: 1),
-              Expanded(
-                flex: 6,
-                child: r == null
-                    ? const Center(child: Text('このページの抽出結果はまだありません'))
-                    : Column(
-                        children: [
-                          _Toolbar(state: s, locked: locked),
-                          const Divider(height: 1),
-                          Expanded(
-                            child: AbsorbPointer(
-                              absorbing: locked,
-                              child: LineList(
-                                lines: r.lines,
-                                selected: s.selected,
-                                speakers: speakers,
-                                onSelect: n.select,
-                                onSpeaker: (i, v) => n.editLine(i, (l) => l.speaker = v),
-                                onText: (i, v) => n.editLine(i, (l) => l.text = v),
-                                onPanel: (i, v) => n.editLine(i, (l) => l.panel = v),
-                                onDelete: n.removeLine,
-                              ),
-                            ),
-                          ),
-                          if (_showCharacters) ...[
-                            const Divider(height: 1),
-                            SizedBox(height: 260, child: CharactersPanel(title: widget.title, run: widget.run)),
-                          ],
-                        ],
+          body: SplitPane(
+            axis: Axis.horizontal,
+            fraction: _split ?? layout[_splitKey] ?? 0.45,
+            minFirst: 240,
+            minSecond: 320,
+            onFractionChanged: (v) => setState(() => _split = v),
+            onFractionCommitted: (v) => _saveLayout(_splitKey, v),
+            first: PageImage(
+              path: ws.capturePath(s.ref),
+              lines: r?.lines ?? const [],
+              selected: s.selected,
+              showMarkers: _showMarkers,
+              onSelect: n.select,
+              onTapEmpty: (x, y) => locked ? null : n.addLine(x: x, y: y),
+            ),
+            second: r == null
+                ? const Center(child: Text('このページの抽出結果はまだありません'))
+                : Column(
+                    children: [
+                      _Toolbar(state: s, locked: locked),
+                      const Divider(height: 1),
+                      Expanded(
+                        child: _showCharacters
+                            ? SplitPane(
+                                axis: Axis.vertical,
+                                fraction: _charactersSplit ?? layout[_charactersKey] ?? 0.55,
+                                minFirst: 120,
+                                minSecond: 120,
+                                onFractionChanged: (v) => setState(() => _charactersSplit = v),
+                                onFractionCommitted: (v) => _saveLayout(_charactersKey, v),
+                                first: lineList,
+                                second: CharactersPanel(title: widget.title, run: widget.run),
+                              )
+                            : lineList,
                       ),
-              ),
-            ],
+                    ],
+                  ),
           ),
         ),
       ),

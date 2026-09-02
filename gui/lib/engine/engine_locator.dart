@@ -22,4 +22,20 @@ class EngineLocator {
 
   /// 同梱エンジンがあればそのパス、なければ開発用の uv コマンド
   static String defaultCommand() => bundledPath() ?? 'uv run --env-file .env manga-dialogue';
+
+  /// 開発時のリポジトリ直下（`pyproject.toml` のあるディレクトリ）。
+  /// `gui/` から `flutter run` した場合でも、カレントディレクトリから親をたどって見つける
+  static String? repoRoot() {
+    var dir = Directory.current.absolute.path;
+    while (true) {
+      if (File(p.join(dir, 'pyproject.toml')).existsSync()) return dir;
+      final parent = p.dirname(dir);
+      if (parent == dir) return null;
+      dir = parent;
+    }
+  }
+
+  /// エンジンの既定の作業ディレクトリ。開発時はリポジトリ直下（`.env` と `pyproject.toml` を
+  /// uv がそこから読む）。同梱エンジンでは不要なので空
+  static String defaultWorkingDir() => bundledPath() != null ? '' : (repoRoot() ?? '');
 }

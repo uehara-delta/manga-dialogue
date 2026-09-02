@@ -18,9 +18,12 @@ class Settings {
     this.defaultModel = 'gemini-3.7-flash',
     this.captureKey = 'space',
     this.captureDelay = 1.5,
+    this.uiScale = 1.0,
+    Map<String, double>? layout,
   })  : engineCommand = engineCommand ?? EngineLocator.defaultCommand(),
         apiKeys = apiKeys ?? {},
-        lastRun = lastRun ?? {};
+        lastRun = lastRun ?? {},
+        layout = layout ?? {};
 
   /// 作品データのルート（既定はアプリ起動ディレクトリ直下の works）
   String worksRoot;
@@ -47,8 +50,18 @@ class Settings {
   String captureKey;
   double captureDelay;
 
-  /// 配布時の既定 works: アプリと同じ階層（macOS は .app の隣、Windows は exe のフォルダ）
+  /// 文字の大きさ（1.0 が標準）
+  double uiScale;
+
+  /// 画面ごとの分割位置など（例: editor.split = 画像側の幅の割合）
+  Map<String, double> layout;
+
+  /// 既定 works の親。開発時はリポジトリ直下、配布時はアプリと同じ階層（macOS は .app の隣、Windows は exe のフォルダ）
   static String _appDir() {
+    if (EngineLocator.bundledPath() == null) {
+      final repo = EngineLocator.repoRoot();
+      if (repo != null) return repo;
+    }
     final exe = Platform.resolvedExecutable;
     if (Platform.isMacOS) {
       final contents = p.dirname(p.dirname(exe));
@@ -76,6 +89,8 @@ class Settings {
           defaultModel: j['defaultModel'] as String? ?? 'gemini-3.7-flash',
           captureKey: j['captureKey'] as String? ?? 'space',
           captureDelay: (j['captureDelay'] as num?)?.toDouble() ?? 1.5,
+          uiScale: (j['uiScale'] as num?)?.toDouble() ?? 1.0,
+          layout: {for (final e in (j['layout'] as Map<String, dynamic>? ?? {}).entries) e.key: (e.value as num).toDouble()},
         );
       } catch (_) {}
     }
@@ -92,6 +107,8 @@ class Settings {
       'defaultModel': defaultModel,
       'captureKey': captureKey,
       'captureDelay': captureDelay,
+      'uiScale': uiScale,
+      'layout': layout,
     }));
   }
 }

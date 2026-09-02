@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'features/capture/captures_screen.dart';
@@ -9,6 +10,7 @@ import 'features/jobs/jobs_screen.dart';
 import 'features/page_editor/page_editor_screen.dart';
 import 'features/review/review_screen.dart';
 import 'features/settings/settings_screen.dart';
+import 'state/providers.dart';
 
 /// 開発用: MD_INITIAL_ROUTE で起動時の画面を指定できる
 final router = GoRouter(
@@ -37,14 +39,21 @@ final router = GoRouter(
   ],
 );
 
-class MangaDialogueApp extends StatelessWidget {
+class MangaDialogueApp extends ConsumerWidget {
   const MangaDialogueApp({super.key});
 
   @override
-  Widget build(BuildContext context) => MaterialApp.router(
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scale = ref.watch(settingsProvider.select((s) => s.uiScale));
+    return MaterialApp.router(
         title: 'manga-dialogue',
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(scale)),
+          child: child!,
+        ),
         theme: ThemeData(colorSchemeSeed: const Color(0xFF2B4C8C), useMaterial3: true, visualDensity: VisualDensity.compact),
         darkTheme: ThemeData(colorSchemeSeed: const Color(0xFF2B4C8C), brightness: Brightness.dark, useMaterial3: true, visualDensity: VisualDensity.compact),
         routerConfig: router,
       );
+  }
 }

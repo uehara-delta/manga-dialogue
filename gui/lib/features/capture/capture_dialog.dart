@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -24,7 +26,7 @@ Future<Job?> showCaptureDialog(BuildContext context, WidgetRef ref, {String? tit
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('Kindle で対象の巻の表紙（1 ページ目）を表示してから実行してください。実行中は Mac に触れないでください。', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const Text('Kindle で対象の巻の表紙（1 ページ目）を表示してから実行してください。実行中はマウス・キーボードに触れないでください。', style: TextStyle(fontSize: 12, color: Colors.grey)),
               const SizedBox(height: 8),
               if (title == null) TextField(controller: titleCtl, decoration: const InputDecoration(labelText: '作品名（フォルダ名になります）')),
               Row(
@@ -39,7 +41,11 @@ Future<Job?> showCaptureDialog(BuildContext context, WidgetRef ref, {String? tit
                   Expanded(
                     child: DropdownButtonFormField<String>(
                       initialValue: key,
-                      decoration: const InputDecoration(labelText: 'ページ送りキー'),
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: 'ページ送りキー',
+                        helperText: Platform.isWindows ? 'Windows ではスペース = ←' : null,
+                      ),
                       items: const [
                         DropdownMenuItem(value: 'space', child: Text('スペース')),
                         DropdownMenuItem(value: 'left', child: Text('←')),

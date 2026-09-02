@@ -2,13 +2,14 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../engine/engine_locator.dart';
 import '../engine/engine_service.dart';
 import '../features/settings/settings.dart';
 import 'providers.dart';
 
 EngineConfig _configFrom(Settings s) => EngineConfig(
       command: s.engineCommand,
-      workingDir: s.engineWorkingDir ?? '',
+      workingDir: s.engineWorkingDir ?? EngineLocator.defaultWorkingDir(),
       worksRoot: s.worksRoot,
       environment: s.environment,
     );

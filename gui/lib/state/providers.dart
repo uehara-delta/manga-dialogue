@@ -13,6 +13,7 @@ class SettingsNotifier extends Notifier<Settings> {
       worksRoot: state.worksRoot, engineCommand: state.engineCommand, engineWorkingDir: state.engineWorkingDir,
       apiKeys: Map.of(state.apiKeys), lastRun: Map.of(state.lastRun), defaultModel: state.defaultModel,
       captureKey: state.captureKey, captureDelay: state.captureDelay,
+      uiScale: state.uiScale, layout: Map.of(state.layout),
     );
     edit(s);
     s.save();
