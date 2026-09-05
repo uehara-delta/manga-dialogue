@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 dist/
 build/
+
+# 手順書 PDF は HTML から生成してリリースに添付する（リポジトリでは管理しない）
+docs/*.pdf
