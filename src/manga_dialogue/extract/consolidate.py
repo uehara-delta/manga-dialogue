@@ -11,6 +11,7 @@ CONSOLIDATE_SYSTEM_PROMPT = """\
 あなたは漫画のセリフ書き起こしデータを整理する編集者です。
 1ページずつ独立に抽出されたセリフ（複数巻にまたがることがあります）と、その過程で作られたキャラ台帳を渡します。
 台帳には、名前が分からなかった時点で付けた「（仮）」付きの仮名が残っています。
+候補（candidates）は台帳に載せる前の仮名で、同様に扱ってください。
 
 ## やること
 全ページのセリフを通して読み、以下を見つけて renames として返してください。
@@ -48,8 +49,16 @@ def build_dialogue_text(work: Work) -> str:
 
 def propose_consolidation(llm: VisionModel, book: CharacterBook, work: Work) -> ConsolidationPlan:
     """台帳と全セリフから、仮名の解決と重複統合の案をモデルに作らせる"""
+    from manga_dialogue.extract.candidates import CandidateStore
+
+    candidates = CandidateStore.load(work.candidates_path)
     book_json = json.dumps(
-        {"characters": [c.model_dump() for c in book.characters]}, ensure_ascii=False, indent=1
+        {
+            "characters": [c.model_dump() for c in book.characters],
+            "candidates": [{"name": c.name, "appearance": c.appearance} for c in candidates.items.values()],
+        },
+        ensure_ascii=False,
+        indent=1,
     )
     user = f"""\
 ## キャラ台帳

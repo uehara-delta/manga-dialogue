@@ -53,12 +53,17 @@ def extract_page(
     image_path: Path,
     book: CharacterBook,
     final_book: bool = False,
+    candidates_text: str = "",
 ) -> PageExtraction:
     """画像1枚をモデルに送り、セリフと新キャラを構造化して返す
 
     final_book=True のときは処理済み範囲を反映した台帳であることをプロンプトで伝える。
+    candidates_text は台帳に未登録の仮名候補（再登場時に同じ仮名を使わせる）。
     """
-    parts = [load_image_part(image_path), TextPart(build_user_prompt(book.to_prompt_text(), final_book=final_book))]
+    parts = [
+        load_image_part(image_path),
+        TextPart(build_user_prompt(book.to_prompt_text(), final_book=final_book, candidates_text=candidates_text)),
+    ]
     try:
         extraction = llm.complete(SYSTEM_PROMPT, parts, PageExtraction, max_tokens=EXTRACT_MAX_TOKENS)
     except RuntimeError as e:

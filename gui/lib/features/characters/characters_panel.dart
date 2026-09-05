@@ -30,6 +30,8 @@ class _CharactersPanelState extends ConsumerState<CharactersPanel> {
         ? characters
         : characters.where((c) => c.name.toLowerCase().contains(q) || c.aliases.any((a) => a.toLowerCase().contains(q)) || c.appearance.toLowerCase().contains(q)).toList();
     final sorted = [...filtered]..sort((a, b) => (counts[b.name] ?? 0).compareTo(counts[a.name] ?? 0));
+    final candidates = ref.watch(workspaceProvider).loadCandidates(title, run)
+      ..sort((a, b) => (counts[b.name] ?? 0).compareTo(counts[a.name] ?? 0));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -85,8 +87,9 @@ class _CharactersPanelState extends ConsumerState<CharactersPanel> {
         ),
         Expanded(
           child: ListView.builder(
-            itemCount: sorted.length,
+            itemCount: sorted.length + (candidates.isEmpty ? 0 : 1),
             itemBuilder: (context, i) {
+              if (i == sorted.length) return _candidatesSection(context, candidates, counts);
               final c = sorted[i];
               return ListTile(
                 dense: true,
@@ -110,6 +113,64 @@ class _CharactersPanelState extends ConsumerState<CharactersPanel> {
         ),
       ],
     );
+  }
+
+  /// 台帳に昇格する前の仮名候補。1 ページしか登場していない人物なので既定で折りたたむ
+  Widget _candidatesSection(BuildContext context, List<Candidate> candidates, Map<String, int> counts) {
+    return ExpansionTile(
+      dense: true,
+      title: Text('候補 ${candidates.length} 名（まだ台帳に載せていない仮名。再登場すると自動で台帳に入ります）', style: const TextStyle(fontSize: 13, color: Colors.grey)),
+      children: [
+        for (final c in candidates)
+          ListTile(
+            dense: true,
+            title: Row(children: [
+              Text(c.name, style: const TextStyle(color: Colors.grey)),
+              const SizedBox(width: 8),
+              Text('${counts[c.name] ?? 0} 件 / ${c.pageCount} ページ', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            ]),
+            subtitle: Text(c.appearance, maxLines: 1, overflow: TextOverflow.ellipsis),
+            trailing: Wrap(spacing: 4, children: [
+              TextButton(onPressed: () => _promote(c), child: const Text('台帳に登録')),
+              TextButton(onPressed: () => _renameCandidate(context, c), child: const Text('改名…')),
+              IconButton(tooltip: '候補から削除（セリフの話者はそのまま）', icon: const Icon(Icons.close, size: 16), onPressed: () => _dropCandidate(c)),
+            ]),
+          ),
+      ],
+    );
+  }
+
+  void _promote(Candidate c) {
+    final ws = ref.read(workspaceProvider);
+    final book = [...ref.read(charactersProvider), Character(name: c.name, appearance: c.appearance)];
+    ref.read(charactersProvider.notifier).save(title, run, book);
+    ws.saveCandidates(title, run, ws.loadCandidates(title, run).where((x) => x.name != c.name).toList());
+    setState(() {});
+  }
+
+  void _dropCandidate(Candidate c) {
+    final ws = ref.read(workspaceProvider);
+    ws.saveCandidates(title, run, ws.loadCandidates(title, run).where((x) => x.name != c.name).toList());
+    setState(() {});
+  }
+
+  Future<void> _renameCandidate(BuildContext context, Candidate c) async {
+    final name = TextEditingController(text: c.name);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('「${c.name}」を改名'),
+        content: SizedBox(width: 380, child: TextField(controller: name, autofocus: true, decoration: const InputDecoration(labelText: '新しい名前（既存のキャラ名なら統合）'))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('キャンセル')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('改名')),
+        ],
+      ),
+    );
+    final to = name.text.trim();
+    if (ok != true || to.isEmpty || to == c.name || !context.mounted) return;
+    await _rename(context, ref, c.name, to);
+    setState(() {});
   }
 
   /// consolidate をジョブとして実行し、終わったらレビュー画面を開く

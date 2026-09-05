@@ -12,6 +12,7 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
+from manga_dialogue.extract.candidates import CandidateStore, is_provisional
 from manga_dialogue.extract.characters import CharacterBook
 from manga_dialogue.extract.consolidate import propose_consolidation
 from manga_dialogue.extract.extractor import DEFAULT_MODEL, ExtractionFailed, extract_page
@@ -21,7 +22,9 @@ from manga_dialogue.extract.llm import PROVIDER_DEFAULT_MODELS, PROVIDER_PREFIXE
 from manga_dialogue.extract.fix import FixPlan, apply_changes, load_pages, propose_fix
 from manga_dialogue.extract.pending import PendingRename, PendingStore
 from manga_dialogue.extract.renames import apply_rename, record_pending
-from manga_dialogue.models import PageResult
+from manga_dialogue.models import Character, PageResult
+
+RESERVED_SPEAKERS = {"不明", "ナレーション", "文字"}
 from manga_dialogue.output.export import FORMATS, export
 from manga_dialogue.workspace import DEFAULT_ROOT, DEFAULT_RUN, RunLocked, Work
 
@@ -217,8 +220,32 @@ def _process_page(
     未満なら pending_renames.jsonl に記録するだけにする。
     """
     page = int(image.stem)
-    extraction = extract_page(llm, image, book, final_book=final_book)
-    added = book.merge(extraction.new_characters)
+    candidates = CandidateStore.load(work.candidates_path)
+    extraction = extract_page(llm, image, book, final_book=final_book, candidates_text=candidates.to_prompt_text())
+
+    # 実名は台帳へ。（仮）は候補へ入れ、複数ページで参照されたら台帳に昇格する
+    named = [c for c in extraction.new_characters if not is_provisional(c.name)]
+    added = book.merge(named)
+    known = {c.name for c in book.characters} | {a for c in book.characters for a in c.aliases}
+    # 話者に使われた固有名が台帳にない場合は外見なしで登録する（後で verify-book などで補う）
+    for line in extraction.lines:
+        name = line.speaker.split("（")[0].strip() if "（心の声）" in line.speaker else line.speaker
+        if line.is_role or is_provisional(name) or name in known or name in RESERVED_SPEAKERS:
+            continue
+        added += book.merge([Character(name=name)])
+        known.add(name)
+    for c in extraction.new_characters:
+        if is_provisional(c.name) and c.name not in known:
+            candidates.note(c.name, work.volume, page, c.appearance)
+    for line in extraction.lines:
+        if is_provisional(line.speaker) and line.speaker not in known:
+            candidates.note(line.speaker, work.volume, page)
+    promoted: list[str] = []
+    for c in candidates.promotable():
+        book.merge([c.to_character()])
+        candidates.remove(c.name)
+        promoted.append(c.name)
+    candidates.save()
     book.save()
     result = PageResult(
         volume=work.volume,
@@ -236,7 +263,7 @@ def _process_page(
     applied: list[dict] = []
     pending: list[dict] = []
     for r in extraction.renames:
-        if book.find(r.from_name) is None:
+        if book.find(r.from_name) is None and candidates.get(r.from_name) is None:
             continue
         if r.confidence >= rename_threshold:
             n = apply_rename(work, book, r.from_name, r.to_name)
@@ -247,6 +274,8 @@ def _process_page(
     notes = [f"{len(extraction.lines)} lines"]
     if added:
         notes.append(f"新キャラ: {', '.join(c.name for c in added)}")
+    if promoted:
+        notes.append(f"仮名を台帳に昇格: {', '.join(promoted)}")
     notes += [f"改名: {a['from']} → {a['to']} ({a['replaced']} 件置換)" for a in applied]
     notes += [f"改名候補(保留): {p['from']} → {p['to']} ({p['confidence']:.2f})" for p in pending]
     reporter.event(
@@ -256,6 +285,8 @@ def _process_page(
         page=page,
         lines=len(extraction.lines),
         new_characters=[c.name for c in added],
+        promoted=promoted,
+        candidates=len(candidates.items),
         renames_applied=applied,
         renames_pending=pending,
         usage={"input_tokens": llm.last_usage.input_tokens, "output_tokens": llm.last_usage.output_tokens},

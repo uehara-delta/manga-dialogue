@@ -26,6 +26,7 @@ class Line(BaseModel):
     x: float | None = Field(default=None, ge=0.0, le=1.0, description="吹き出し中心の横位置。画像左端 0.0〜右端 1.0")
     y: float | None = Field(default=None, ge=0.0, le=1.0, description="吹き出し中心の縦位置。画像上端 0.0〜下端 1.0")
     manual: bool = Field(default=False, description="人手または fix で修正済み。再抽出で上書きしない")
+    is_role: bool = Field(default=False, description="speaker が固有名ではなく「兵士」「村人」のような役割名のとき true")
 
 
 class Rename(BaseModel):

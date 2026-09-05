@@ -10,7 +10,23 @@ def apply_rename(work: Work, book: CharacterBook, from_name: str, to_name: str) 
     """台帳を改名し、出力済み JSON の speaker を書き換える。書き換えたセリフ数を返す"""
     if from_name == to_name:
         return 0
-    book.rename(from_name, to_name)
+    from manga_dialogue.extract.candidates import CandidateStore
+    from manga_dialogue.models import Character
+
+    candidates = CandidateStore.load(work.candidates_path)
+    candidate = candidates.remove(from_name)
+    if candidate is not None:
+        candidates.save()
+    if not book.rename(from_name, to_name) and candidate is not None and book.find(to_name) is None:
+        # 候補のまま本名が判明した: 候補の外見を引き継いで台帳に登録する
+        book.characters.append(Character(name=to_name, aliases=[from_name], appearance=candidate.appearance))
+    elif candidate is not None:
+        target = book.find(to_name)
+        if target is not None:
+            if from_name not in target.aliases and from_name != target.name:
+                target.aliases.append(from_name)
+            if not target.appearance:
+                target.appearance = candidate.appearance
     book.save()
     changed = 0
     for out in _all_output_files(work):

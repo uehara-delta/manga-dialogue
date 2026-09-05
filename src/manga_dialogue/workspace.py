@@ -46,6 +46,10 @@ class Work:
         return self.run_dir / "pending_renames.jsonl"
 
     @property
+    def candidates_path(self) -> Path:
+        return self.run_dir / "candidates.json"
+
+    @property
     def lock_path(self) -> Path:
         return self.run_dir / ".lock"
 

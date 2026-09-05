@@ -49,6 +49,7 @@ class Workspace {
   String outputDir(String title, String run, int volume) => p.join(runDir(title, run), 'volumes', _nn(volume), 'output');
   String charactersPath(String title, String run) => p.join(runDir(title, run), 'characters.json');
   String lockPath(String title, String run) => p.join(runDir(title, run), '.lock');
+  String candidatesPath(String title, String run) => p.join(runDir(title, run), 'candidates.json');
   String capturePath(PageRef r) => p.join(capturesDir(r.title, r.volume), '${_nnnn(r.page)}.png');
   String outputPath(PageRef r) => p.join(outputDir(r.title, r.run, r.volume), '${_nnnn(r.page)}.json');
 
@@ -185,6 +186,19 @@ class Workspace {
     final f = File(charactersPath(title, run));
     f.parent.createSync(recursive: true);
     f.writeAsStringSync('${_encoder.convert({'characters': [for (final c in characters) c.toJson()]})}\n');
+  }
+
+  List<Candidate> loadCandidates(String title, String run) {
+    final f = File(candidatesPath(title, run));
+    if (!f.existsSync()) return [];
+    final j = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+    return [for (final c in (j['candidates'] as List? ?? [])) Candidate.fromJson(c as Map<String, dynamic>)];
+  }
+
+  void saveCandidates(String title, String run, List<Candidate> candidates) {
+    final f = File(candidatesPath(title, run));
+    f.parent.createSync(recursive: true);
+    f.writeAsStringSync('${_encoder.convert({'candidates': [for (final c in candidates) c.toJson()]})}\n');
   }
 
   /// run 内の全ページを走査して話者ごとのセリフ数を数える

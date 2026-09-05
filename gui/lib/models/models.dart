@@ -124,3 +124,25 @@ class Character {
 
 /// 話者として選べる固定の値
 const specialSpeakers = ['不明', 'ナレーション', '文字'];
+
+/// 台帳に昇格する前の仮名候補（candidates.json）
+class Candidate {
+  Candidate({required this.name, this.appearance = '', List<Map<String, dynamic>>? seen, Map<String, dynamic>? extra})
+      : seen = seen ?? [],
+        extra = extra ?? {};
+  String name;
+  String appearance;
+  List<Map<String, dynamic>> seen;
+  final Map<String, dynamic> extra;
+
+  int get pageCount => seen.length;
+
+  factory Candidate.fromJson(Map<String, dynamic> j) => Candidate(
+        name: j['name'] as String,
+        appearance: j['appearance'] as String? ?? '',
+        seen: [for (final s in (j['seen'] as List? ?? [])) Map<String, dynamic>.from(s as Map)],
+        extra: {for (final e in j.entries) if (!{'name', 'appearance', 'seen'}.contains(e.key)) e.key: e.value},
+      );
+
+  Map<String, dynamic> toJson() => {'name': name, 'appearance': appearance, 'seen': seen, ...extra};
+}
