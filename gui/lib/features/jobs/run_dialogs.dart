@@ -10,9 +10,9 @@ import '../../state/engine_providers.dart';
 Future<Job?> showExtractDialog(BuildContext context, WidgetRef ref, {required String title, required List<int> volumes, required List<String> runs, String? defaultRun, String? defaultModel}) async {
   var volume = volumes.isEmpty ? 1 : volumes.first;
   final modelName = defaultModel ?? 'gemini-3.7-flash';
-  // 保存先は「同じモデルで既に抽出した結果」があればそれ、なければモデル名
+  // 保存先は既存の run（そのモデルが記録されている）か、新規ならモデル名
   final model = TextEditingController(text: modelName);
-  final run = TextEditingController(text: defaultRun ?? (runs.contains(modelName) ? modelName : modelName));
+  final run = TextEditingController(text: defaultRun ?? modelName);
   var resume = true;
   var verifyAfter = true;
   final ok = await showDialog<bool>(
@@ -33,7 +33,7 @@ Future<Job?> showExtractDialog(BuildContext context, WidgetRef ref, {required St
               ),
               TextField(
                 controller: model,
-                decoration: const InputDecoration(labelText: 'モデル', helperText: 'gemini-* / claude-* / gpt-*'),
+                decoration: const InputDecoration(labelText: 'モデル', helperText: 'gemini-* / claude-* / gpt-*。既存の保存先に別のモデルで実行すると、以降その保存先のモデルとして記録されます'),
                 onChanged: (v) { if (!runs.contains(run.text)) run.text = v.trim(); },
               ),
               TextField(controller: run, decoration: const InputDecoration(labelText: '結果の保存先', helperText: '同じ保存先で続けると台帳を引き継ぎます。通常はモデル名のままで構いません')),

@@ -188,6 +188,22 @@ class Workspace {
     f.writeAsStringSync('${_encoder.convert({'characters': [for (final c in characters) c.toJson()]})}\n');
   }
 
+  /// run.json に記録されたモデル。なければ run 名がモデル ID の形ならそれ、それも違えば null
+  String? runModel(String title, String run) {
+    final f = File(p.join(runDir(title, run), 'run.json'));
+    if (f.existsSync()) {
+      try {
+        final j = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+        final m = j['model'] as String?;
+        if (m != null && m.isNotEmpty) return m;
+      } catch (_) {}
+    }
+    for (final prefix in const ['claude-', 'gemini-', 'gpt-']) {
+      if (run.startsWith(prefix)) return run;
+    }
+    return null;
+  }
+
   List<Candidate> loadCandidates(String title, String run) {
     final f = File(candidatesPath(title, run));
     if (!f.existsSync()) return [];

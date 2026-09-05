@@ -117,6 +117,9 @@ works/<作品名>/
 - `extract` / `repass` / `consolidate` / `rename` / `fix` / `export` は `--run 名前`（既定 `default`）で
   対象の run を指定します。新しい run を既存 run の台帳から始めるには
   `extract ... --run gemini --from-run default` のように `--from-run` を付けます
+- run で使ったモデルは `runs/<run>/run.json` に記録され、`repass` / `consolidate` / `verify-book` / `fix` で
+  `--model` を省略すると同じモデルが使われます（記録のない古い run は、run 名がモデル ID ならそれ、
+  そうでなければ既定モデル）
 
 ### Step 1: キャプチャ
 

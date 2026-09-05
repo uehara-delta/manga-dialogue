@@ -91,7 +91,7 @@ class _WorkDetailState extends ConsumerState<WorkDetail> {
         FutureBuilder<int>(
           future: _sizeFuture ??= _computeSize(ws.workDir(work.title)),
           builder: (context, snap) => Text(
-            '${work.volumes.length} 巻   使用容量 ${snap.hasData ? _fmtSize(snap.data!) : '…'}${r != null ? '   台帳 $characters 名' : ''}',
+            '${work.volumes.length} 巻   使用容量 ${snap.hasData ? _fmtSize(snap.data!) : '…'}${r != null ? '   台帳 $characters 名' : ''}${r != null && ws.runModel(work.title, r) != null ? '   モデル ${ws.runModel(work.title, r)}' : ''}',
             style: const TextStyle(color: Colors.grey),
           ),
         ),
@@ -122,7 +122,16 @@ class _WorkDetailState extends ConsumerState<WorkDetail> {
                 value: r,
                 isDense: true,
                 underline: const SizedBox(),
-                items: [for (final x in work.runs) DropdownMenuItem(value: x, child: Text(x))],
+                items: [
+                  for (final x in work.runs)
+                    DropdownMenuItem(
+                      value: x,
+                      child: Text(() {
+                        final m = ws.runModel(work.title, x);
+                        return m == null || m == x ? x : '$x（$m）';
+                      }()),
+                    ),
+                ],
                 onChanged: (v) { if (v != null) _remember(v); },
               ),
               const SizedBox(width: 8),
@@ -169,7 +178,7 @@ class _WorkDetailState extends ConsumerState<WorkDetail> {
               final job = await showExtractDialog(
                 context, ref,
                 title: work.title, volumes: [volume], runs: work.runs,
-                defaultRun: r, defaultModel: ref.read(settingsProvider).defaultModel,
+                defaultRun: r, defaultModel: (r == null ? null : ws.runModel(work.title, r)) ?? ref.read(settingsProvider).defaultModel,
               );
               if (job != null && context.mounted) {
                 if (job.run != null) _remember(job.run!);

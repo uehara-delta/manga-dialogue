@@ -120,9 +120,15 @@ class _PageEditorScreenState extends ConsumerState<PageEditorScreen> {
                 Text(widget.title),
                 const SizedBox(width: 12),
                 _VolumeSwitcher(title: widget.title, run: widget.run, volume: widget.volume),
-                if (ws.listRuns(widget.title).length > 1) ...[
+                if (ws.listRuns(widget.title).length > 1 || ws.runModel(widget.title, widget.run) != null) ...[
                   const SizedBox(width: 12),
-                  Text('抽出モデル: ${widget.run}', style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                  Text(
+                    () {
+                      final m = ws.runModel(widget.title, widget.run);
+                      return m == null || m == widget.run ? '抽出モデル: ${widget.run}' : '抽出モデル: ${widget.run}（$m）';
+                    }(),
+                    style: const TextStyle(fontSize: 13, color: Colors.grey),
+                  ),
                 ],
               ],
             ),

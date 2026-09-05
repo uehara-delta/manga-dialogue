@@ -16,7 +16,7 @@ from manga_dialogue.extract.candidates import CandidateStore, is_provisional
 from manga_dialogue.extract.characters import CharacterBook
 from manga_dialogue.extract.consolidate import propose_consolidation
 from manga_dialogue.extract.extractor import DEFAULT_MODEL, ExtractionFailed, extract_page
-from manga_dialogue.extract.llm import VisionModel, get_model
+from manga_dialogue.extract.llm import VisionModel, get_model, provider_for
 from manga_dialogue.extract.llm.base import Cancelled
 from manga_dialogue.extract.llm import PROVIDER_DEFAULT_MODELS, PROVIDER_PREFIXES
 from manga_dialogue.extract.fix import FixPlan, apply_changes, load_pages, propose_fix
@@ -200,6 +200,26 @@ def trim(
     reporter.event("done", f"{'対象' if dry_run else '切り落とし'}: {trimmed} ページ", trimmed=trimmed, dry_run=dry_run)
 
 
+def _inferred_run_model(work: Work) -> str | None:
+    """記録のない旧 run 向け: run 名がモデル ID の形（claude-* / gemini-* / gpt-*）ならそれをモデルとみなす"""
+    try:
+        provider_for(work.run)
+    except ValueError:
+        return None
+    return work.run
+
+
+def _default_model_for(work: Work) -> str:
+    return work.run_model() or _inferred_run_model(work) or DEFAULT_MODEL
+
+
+def _resolve_model(work: Work, model: str | None) -> str:
+    """--model が省略されたら run に記録されたモデル（なければ run 名から推定、それもなければ既定）を使い、記録する"""
+    chosen = model or _default_model_for(work)
+    work.record_run_model(chosen)
+    return chosen
+
+
 def _get_model(model: str) -> VisionModel:
     try:
         return get_model(model)
@@ -339,7 +359,7 @@ def _report_failures(failed: list[str]) -> None:
 @app.command()
 def extract(
     title: str = typer.Argument(help="作品名（works/<title>/captures を処理）"),
-    model: str = typer.Option(DEFAULT_MODEL, help="使用するモデル ID"),
+    model: str | None = typer.Option(None, help="使用するモデル ID（省略時は run に記録されたモデル、なければ既定）"),
     resume: bool = typer.Option(False, help="出力済みページをスキップして再開"),
     rename_threshold: float = typer.Option(0.8, help="この confidence 以上の改名指示を自動適用"),
     volume: int = typer.Option(1, help="巻番号"),
@@ -358,9 +378,10 @@ def extract(
 
     work.ensure_dirs()
     book = CharacterBook.load(work.characters_path)
+    model = _resolve_model(work, model)
     llm = _get_model(model)
     _install_cancel_handlers()
-    reporter.event("start", total=len(images), volume=volume)
+    reporter.event("start", f"抽出開始: {model}", total=len(images), volume=volume, model=model)
 
     failed: list[str] = []
     processed = 0
@@ -395,7 +416,7 @@ def extract(
 @app.command()
 def repass(
     title: str = typer.Argument(help="作品名"),
-    model: str = typer.Option(DEFAULT_MODEL, help="使用するモデル ID"),
+    model: str | None = typer.Option(None, help="使用するモデル ID（省略時は run に記録されたモデル）"),
     min_confidence: float = typer.Option(0.5, help="この値未満の confidence を含むページを再抽出"),
     all_pages: bool = typer.Option(False, "--all", help="条件に関係なく全ページを再抽出"),
     pages: list[int] = typer.Option([], "--page", help="指定ページだけ再抽出（複数指定可）"),
@@ -438,11 +459,13 @@ def repass(
                 continue
             targets.append((vol, image))
 
+    model = model or _default_model_for(work)
     reporter.event(
         "start",
-        f"再抽出対象: {len(targets)} ページ（台帳 {len(book.characters)} 名）"
+        f"再抽出対象: {len(targets)} ページ（台帳 {len(book.characters)} 名、モデル {model}）"
         + (f"、手動修正済みのためスキップ: {len(skipped_manual)}" if skipped_manual else ""),
         total=len(targets),
+        model=model,
         skipped_manual=skipped_manual,
         targets=[{"volume": v.volume, "page": int(t.stem)} for v, t in targets],
     )
@@ -451,6 +474,7 @@ def repass(
             reporter.event("target", f"  v{vol.volume:02d} {t.name}", volume=vol.volume, page=int(t.stem))
         return
 
+    work.record_run_model(model)
     llm = _get_model(model)
     _install_cancel_handlers()
     failed: list[str] = []
@@ -481,7 +505,7 @@ def repass(
 @app.command()
 def consolidate(
     title: str = typer.Argument(help="作品名"),
-    model: str = typer.Option(DEFAULT_MODEL, help="使用するモデル ID"),
+    model: str | None = typer.Option(None, help="使用するモデル ID（省略時は run に記録されたモデル）"),
     rename_threshold: float = typer.Option(0.8, help="この confidence 以上の提案を自動適用"),
     dry_run: bool = typer.Option(False, help="提案を表示するだけで適用しない"),
     run: str = typer.Option(DEFAULT_RUN, help="結果を保存する run 名（モデルごとに分けるなど）"),
@@ -497,7 +521,7 @@ def consolidate(
         reporter.error("台帳または出力がありません。先に extract を実行してください")
         raise typer.Exit(1)
 
-    llm = _get_model(model)
+    llm = _get_model(_resolve_model(work, model))
     try:
         plan = propose_consolidation(llm, book, work)
     except Exception as e:
@@ -541,7 +565,7 @@ def verify_book(
     min_lines: int = typer.Option(5, help="省略時の対象とする最小セリフ数"),
     threshold: float = typer.Option(0.7, help="この confidence 以上なら台帳を書き換える"),
     dry_run: bool = typer.Option(False, help="書き換えずに差分を表示する"),
-    model: str = typer.Option(DEFAULT_MODEL, help="使用するモデル ID"),
+    model: str | None = typer.Option(None, help="使用するモデル ID（省略時は run に記録されたモデル）"),
     run: str = typer.Option(DEFAULT_RUN, help="run 名"),
     root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
 ) -> None:
@@ -564,9 +588,10 @@ def verify_book(
     if not targets:
         reporter.error("検証対象がありません（尻尾判定のセリフがある実名キャラが必要です）")
         raise typer.Exit(1)
+    model = _resolve_model(work, model)
     llm = _get_model(model)
     _install_cancel_handlers()
-    reporter.event("start", f"検証対象: {len(targets)} 名", total=len(targets), names=targets)
+    reporter.event("start", f"検証対象: {len(targets)} 名（モデル {model}）", total=len(targets), names=targets, model=model)
     changed = 0
     try:
         with work.locked("verify-book"):
@@ -654,7 +679,7 @@ def fix(
     with_images: bool = typer.Option(False, help="対象ページの画像も添付する（費用増）"),
     apply: bool = typer.Option(False, help="変更案を適用する（省略時は提案のみ）"),
     apply_from: Path | None = typer.Option(None, "--apply-from", help="変更案の JSON（{\"changes\": [...]}）を読み込んで適用する。API は呼ばない"),
-    model: str = typer.Option(DEFAULT_MODEL, help="使用するモデル ID"),
+    model: str | None = typer.Option(None, help="使用するモデル ID（省略時は run に記録されたモデル）"),
     run: str = typer.Option(DEFAULT_RUN, help="結果を保存する run 名（モデルごとに分けるなど）"),
     root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
 ) -> None:
@@ -682,7 +707,7 @@ def fix(
         reporter.error("対象ページがありません")
         raise typer.Exit(1)
 
-    llm = _get_model(model)
+    llm = _get_model(_resolve_model(work, model))
     try:
         plan = propose_fix(llm, book, targets, instruction, with_images=with_images)
     except Exception as e:

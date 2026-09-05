@@ -50,6 +50,32 @@ class Work:
         return self.run_dir / "candidates.json"
 
     @property
+    def run_meta_path(self) -> Path:
+        return self.run_dir / "run.json"
+
+    def load_run_meta(self) -> dict:
+        if not self.run_meta_path.exists():
+            return {}
+        try:
+            return json.loads(self.run_meta_path.read_text(encoding="utf-8"))
+        except ValueError:
+            return {}
+
+    def run_model(self) -> str | None:
+        """この run で使ったモデル。記録がなければ None"""
+        return self.load_run_meta().get("model")
+
+    def record_run_model(self, model: str) -> None:
+        """run のモデルを記録する。初回は created_at も書く"""
+        meta = self.load_run_meta()
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        meta.setdefault("created_at", now)
+        meta["model"] = model
+        meta["updated_at"] = now
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.run_meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    @property
     def lock_path(self) -> Path:
         return self.run_dir / ".lock"
 
