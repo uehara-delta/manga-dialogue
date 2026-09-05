@@ -291,6 +291,22 @@ uv run manga-dialogue pending reopen  "作品名" <id> --run gemini  # 却下を
 置換は行わず状態だけ更新されます。GUI ではページ編集画面または台帳パネルの「改名候補のレビュー」から
 同じ操作ができます。
 
+### 台帳の外見の検証（verify-book）
+
+台帳の外見は初出ページで書かれるため、別人の外見を書いてしまったり 2 人が入れ替わったりすると、
+以降の話者判定に誤りが伝播します。`verify-book` は、その人物が実際に話している（尻尾判定・高 confidence の）
+ページの画像を最大 2 枚選び、外見を記述し直します。抽出中にも、台帳の外見が空・暫定的（声だけの場面など）な
+人物や、画像と食い違う人物については LLM が `appearance_updates` として訂正を返し、自動で反映されます。
+
+```bash
+uv run manga-dialogue verify-book "作品名" --run gemini --dry-run   # 差分を見る
+uv run manga-dialogue verify-book "作品名" --run gemini             # セリフ数上位 10 名を書き直す
+uv run manga-dialogue verify-book "作品名" --run gemini --name 太郎 --name 花子
+```
+
+書き直したあとは `repass --all` で再抽出すると、正しい外見で話者が判定されます。GUI では台帳パネルの
+「台帳の外見を検証」から実行できます。
+
 ### 手動での改名（rename）
 
 仮名や誤った名前を手で直したいときは `rename` を使います。台帳を更新し、出力済み JSON の

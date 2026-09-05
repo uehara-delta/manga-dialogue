@@ -68,6 +68,11 @@ class _CharactersPanelState extends ConsumerState<CharactersPanel> {
               ),
               const SizedBox(width: 4),
               IconButton(
+                tooltip: '台帳の外見を検証（verify-book）',
+                icon: const Icon(Icons.fact_check_outlined, size: 20),
+                onPressed: () => _verifyBook(context, ref),
+              ),
+              IconButton(
                 tooltip: '台帳を整理（consolidate）',
                 icon: const Icon(Icons.merge_type, size: 20),
                 onPressed: () => _consolidate(context, ref),
@@ -171,6 +176,32 @@ class _CharactersPanelState extends ConsumerState<CharactersPanel> {
     if (ok != true || to.isEmpty || to == c.name || !context.mounted) return;
     await _rename(context, ref, c.name, to);
     setState(() {});
+  }
+
+  /// verify-book をジョブとして実行し、終わったら台帳を再読込する
+  Future<void> _verifyBook(BuildContext context, WidgetRef ref) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('台帳の外見を検証しますか？'),
+        content: const Text('セリフ数の多い実名キャラについて、その人物が話しているページの画像から外見を記述し直します。'
+            '初出ページでの登録ミス（別人の外見、2 人の入れ替わり）を直すための処理です。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('キャンセル')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('実行')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final job = await ref.read(jobsProvider.notifier).start(['verify-book', title, '--run', run], label: '台帳の検証: $title ($run)', run: run);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('台帳の検証を開始しました（ジョブ画面で進捗を確認できます）')));
+    job.stream.listen(null, onDone: () {
+      if (!context.mounted) return;
+      ref.read(charactersProvider.notifier).load(title, run);
+      final changed = job.events.where((e) => e.type == 'done').map((e) => e.data['changed']).firstOrNull;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(job.errorMessage ?? '台帳の検証が完了しました（$changed 名の外見を更新）')));
+    });
   }
 
   /// consolidate をジョブとして実行し、終わったらレビュー画面を開く

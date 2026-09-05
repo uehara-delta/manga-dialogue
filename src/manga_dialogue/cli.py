@@ -25,6 +25,8 @@ from manga_dialogue.extract.renames import apply_rename, record_pending
 from manga_dialogue.models import Character, PageResult
 
 RESERVED_SPEAKERS = {"不明", "ナレーション", "文字"}
+APPEARANCE_FILL_THRESHOLD = 0.6
+APPEARANCE_REPLACE_THRESHOLD = 0.8
 from manga_dialogue.output.export import FORMATS, export
 from manga_dialogue.workspace import DEFAULT_ROOT, DEFAULT_RUN, RunLocked, Work
 
@@ -260,6 +262,19 @@ def _process_page(
     work.output_path(page).write_text(
         json.dumps(result.model_dump(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+    # 外見の訂正: 空・暫定的な記述は 0.6 以上、既存の記述の置き換えは 0.8 以上で適用する
+    appearance_changes: list[dict] = []
+    for u in extraction.appearance_updates:
+        target = book.find(u.name)
+        if target is None or not u.appearance.strip():
+            continue
+        threshold = APPEARANCE_FILL_THRESHOLD if book.is_placeholder_appearance(target) else APPEARANCE_REPLACE_THRESHOLD
+        if u.confidence >= threshold and u.appearance.strip() != target.appearance:
+            appearance_changes.append({"name": target.name, "before": target.appearance, "after": u.appearance.strip(), "confidence": u.confidence})
+            target.appearance = u.appearance.strip()
+    if appearance_changes:
+        book.save()
+
     applied: list[dict] = []
     pending: list[dict] = []
     for r in extraction.renames:
@@ -276,6 +291,7 @@ def _process_page(
         notes.append(f"新キャラ: {', '.join(c.name for c in added)}")
     if promoted:
         notes.append(f"仮名を台帳に昇格: {', '.join(promoted)}")
+    notes += [f"外見更新: {a['name']}" for a in appearance_changes]
     notes += [f"改名: {a['from']} → {a['to']} ({a['replaced']} 件置換)" for a in applied]
     notes += [f"改名候補(保留): {p['from']} → {p['to']} ({p['confidence']:.2f})" for p in pending]
     reporter.event(
@@ -287,6 +303,7 @@ def _process_page(
         new_characters=[c.name for c in added],
         promoted=promoted,
         candidates=len(candidates.items),
+        appearance_updates=appearance_changes,
         renames_applied=applied,
         renames_pending=pending,
         usage={"input_tokens": llm.last_usage.input_tokens, "output_tokens": llm.last_usage.output_tokens},
@@ -514,6 +531,77 @@ def _apply_consolidation(work: Work, book: CharacterBook, plan, rename_threshold
             confidence=r.confidence, reason=r.reason, replaced=replaced,
         )
     reporter.event("done", "" if dry_run else f"完了: {applied} 件適用 / 台帳 {len(book.characters)} 名", applied=applied, characters=len(book.characters))
+
+
+@app.command("verify-book")
+def verify_book(
+    title: str = typer.Argument(help="作品名"),
+    names: list[str] = typer.Option([], "--name", help="検証する名前（複数指定可。省略時はセリフ数上位）"),
+    top: int = typer.Option(10, help="省略時に検証する人数（セリフ数上位）"),
+    min_lines: int = typer.Option(5, help="省略時の対象とする最小セリフ数"),
+    threshold: float = typer.Option(0.7, help="この confidence 以上なら台帳を書き換える"),
+    dry_run: bool = typer.Option(False, help="書き換えずに差分を表示する"),
+    model: str = typer.Option(DEFAULT_MODEL, help="使用するモデル ID"),
+    run: str = typer.Option(DEFAULT_RUN, help="run 名"),
+    root: Path = typer.Option(DEFAULT_ROOT, help="作品ルートディレクトリ"),
+) -> None:
+    """台帳の外見を、その人物が実際に話しているページの画像から検証して書き直す
+
+    初出ページでの登録ミス（別人の外見、2 人の入れ替わり）を後から直すためのコマンド。
+    """
+    from collections import Counter
+
+    from manga_dialogue.extract.verify import collect_evidence, select_targets, verify_character
+
+    work = Work(title, root, run=run)
+    book = CharacterBook.load(work.characters_path)
+    counts: Counter[str] = Counter()
+    for vol in work.all_volumes():
+        for out in vol.output_files():
+            for line in PageResult.model_validate_json(out.read_text(encoding="utf-8")).lines:
+                counts[line.speaker] += 1
+    targets = select_targets(book, counts, names, top, min_lines)
+    if not targets:
+        reporter.error("検証対象がありません（尻尾判定のセリフがある実名キャラが必要です）")
+        raise typer.Exit(1)
+    llm = _get_model(model)
+    _install_cancel_handlers()
+    reporter.event("start", f"検証対象: {len(targets)} 名", total=len(targets), names=targets)
+    changed = 0
+    try:
+        with work.locked("verify-book"):
+            for name in targets:
+                _check_cancel()
+                evidence = collect_evidence(work, name)
+                if not evidence:
+                    reporter.event("verified", f"  {name}: 尻尾判定のセリフがなく検証できません", name=name, skipped=True)
+                    continue
+                try:
+                    v = verify_character(llm, name, evidence)
+                except Exception as e:
+                    reporter.event("verified", f"  {name}: 失敗 {e}", name=name, error=str(e)[:200])
+                    continue
+                c = book.find(name)
+                before = c.appearance if c else ""
+                apply = not dry_run and v.confidence >= threshold and v.appearance.strip() and v.appearance.strip() != before
+                if apply and c is not None:
+                    c.appearance = v.appearance.strip()
+                    book.save()
+                    changed += 1
+                mark = "更新" if apply else ("候補" if dry_run else "据え置き")
+                pages = ", ".join(f"{e.result.volume}巻p{e.result.page:03d}" for e in evidence)
+                reporter.event(
+                    "verified",
+                    f"  [{mark} {v.confidence:.2f}] {name}  ({pages})\n      前: {before}\n      後: {v.appearance}" + (f"\n      注: {v.note}" if v.note else ""),
+                    name=name, before=before, after=v.appearance, confidence=v.confidence, note=v.note,
+                    applied=apply, pages=[{"volume": e.result.volume, "page": e.result.page} for e in evidence],
+                    usage={"input_tokens": llm.last_usage.input_tokens, "output_tokens": llm.last_usage.output_tokens},
+                )
+    except RunLocked as e:
+        _locked_exit(e)
+    except Cancelled:
+        _cancelled_exit(done=changed, usage=_usage_total(llm))
+    reporter.event("done", f"完了: {changed} 名の外見を更新", changed=changed, usage=_usage_total(llm))
 
 
 @app.command()

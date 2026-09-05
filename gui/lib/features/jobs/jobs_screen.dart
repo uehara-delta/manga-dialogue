@@ -104,6 +104,7 @@ class _JobTile extends ConsumerWidget {
           '${(d['new_characters'] as List?)?.isNotEmpty == true ? '  新キャラ: ${(d['new_characters'] as List).join(', ')}' : ''}',
       'page_failed' => '$t  失敗 page ${d['page']}: ${d['message']}',
       'proposal' => '$t  [${d['status']} ${d['confidence']}] ${d['from_name']} → ${d['to_name']}',
+      'verified' => '$t  ${d['applied'] == true ? '更新' : '据え置き'} ${d['name']}: ${d['after'] ?? d['error'] ?? ''}',
       'change' => '$t  v${d['volume']} p${d['page']} #${d['index']}: ${d['reason']}',
       'error' => '$t  エラー: ${d['message']}',
       _ => '$t  ${e.type}  ${d.entries.where((x) => x.key != 'event').map((x) => '${x.key}=${x.value}').join(' ')}',

@@ -221,11 +221,24 @@ def normalize_text(lines: list["Line"]) -> list["Line"]:
     return [l.model_copy(update={"text": collapse_whitespace(l.text)}) for l in lines]
 
 
+class AppearanceUpdate(BaseModel):
+    """台帳に載っている人物の外見の訂正・補足"""
+
+    name: str = Field(description="台帳の名前")
+    appearance: str = Field(description="このページで確認できた恒常的な特徴を反映した新しい外見")
+    confidence: float = Field(ge=0.0, le=1.0, description="この人物で間違いないという確信度")
+    reason: str = Field(default="", description="根拠（呼びかけ・尻尾など）")
+
+
 class PageExtraction(BaseModel):
     """LLM が1ページ分の画像に対して返す構造化出力"""
 
     panels: list[Panel] = Field(default_factory=list, description="ページ内の全コマの矩形")
     lines: list[Line]
+    appearance_updates: list[AppearanceUpdate] = Field(
+        default_factory=list,
+        description="台帳の外見が空、または画像と食い違う人物の外見の訂正",
+    )
     new_characters: list[Character] = Field(
         default_factory=list,
         description="台帳に存在しない新キャラ。名前不明でも継続登場しそうなら仮名で登録",

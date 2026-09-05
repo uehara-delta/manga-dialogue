@@ -45,6 +45,13 @@ class CharacterBook:
             added.append(c)
         return added
 
+    PLACEHOLDER_MARKERS = ("電話", "通話", "声のみ", "声だけ", "未確認", "不明")
+
+    def is_placeholder_appearance(self, c: Character) -> bool:
+        """外見がまだ実質的に記述されていない（空、または声だけの場面での暫定記述）"""
+        text = c.appearance.strip()
+        return not text or any(m in text for m in self.PLACEHOLDER_MARKERS)
+
     def find(self, name: str) -> Character | None:
         for c in self.characters:
             if c.name == name or name in c.aliases:
