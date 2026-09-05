@@ -14,6 +14,7 @@ Future<Job?> showExtractDialog(BuildContext context, WidgetRef ref, {required St
   final model = TextEditingController(text: modelName);
   final run = TextEditingController(text: defaultRun ?? (runs.contains(modelName) ? modelName : modelName));
   var resume = true;
+  var verifyAfter = true;
   final ok = await showDialog<bool>(
     context: context,
     builder: (context) => StatefulBuilder(
@@ -42,6 +43,13 @@ Future<Job?> showExtractDialog(BuildContext context, WidgetRef ref, {required St
                 title: const Text('出力済みページをスキップ（--resume）'),
                 onChanged: (v) => setState(() => resume = v ?? true),
               ),
+              CheckboxListTile(
+                value: verifyAfter,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('抽出完了後に台帳の外見を検証する（verify-book）'),
+                subtitle: const Text('主要キャラの外見を、実際に話しているページの画像から書き直します', style: TextStyle(fontSize: 11)),
+                onChanged: (v) => setState(() => verifyAfter = v ?? true),
+              ),
             ],
           ),
         ),
@@ -53,11 +61,25 @@ Future<Job?> showExtractDialog(BuildContext context, WidgetRef ref, {required St
     ),
   );
   if (ok != true) return null;
-  return ref.read(jobsProvider.notifier).start(
-    ['extract', title, '--volume', '$volume', '--run', run.text.trim(), '--model', model.text.trim(), if (resume) '--resume'],
-    label: '抽出: $title $volume巻 (${run.text.trim()})',
-    run: run.text.trim(),
+  final runName = run.text.trim();
+  final modelId = model.text.trim();
+  final job = await ref.read(jobsProvider.notifier).start(
+    ['extract', title, '--volume', '$volume', '--run', runName, '--model', modelId, if (resume) '--resume'],
+    label: '抽出: $title $volume巻 ($runName)',
+    run: runName,
   );
+  if (verifyAfter) {
+    // 抽出が正常終了したら、同じ run・同じモデルで台帳の外見を検証する
+    job.stream.listen(null, onDone: () {
+      if (job.status != JobStatus.succeeded) return;
+      ref.read(jobsProvider.notifier).start(
+        ['verify-book', title, '--run', runName, '--model', modelId],
+        label: '台帳の検証: $title ($runName)',
+        run: runName,
+      );
+    });
+  }
+  return job;
 }
 
 /// エクスポートの実行ダイアログ。巻ごと、または全巻を書き出す。
