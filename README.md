@@ -396,6 +396,7 @@ https://www.anthropic.com/pricing を参照してください。まず `--max-pa
 | tmux 内でページ送りが効かない | 上記「tmux を使っている場合の注意」を参照 |
 | `authentication_error` | `ANTHROPIC_API_KEY` が未設定または誤り。`echo $ANTHROPIC_API_KEY` で確認 |
 | `rate_limit_error` | しばらく待って `--resume` で再開 |
+| 1 ページで長時間止まる | 1 リクエストは既定 600 秒で打ち切って再試行します（環境変数 `MANGA_DIALOGUE_REQUEST_TIMEOUT` で変更可）。Ctrl+C / GUI のキャンセルは待機中でも即時に効きます |
 
 ## GUI（Flutter）
 

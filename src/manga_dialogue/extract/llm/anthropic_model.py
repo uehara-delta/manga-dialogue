@@ -4,7 +4,19 @@ import anthropic
 import httpx2 as httpx
 from pydantic import ValidationError
 
-from manga_dialogue.extract.llm.base import ImagePart, ParseError, Part, Refused, TextPart, TransientError, Usage, VisionModel
+from manga_dialogue.extract.llm.base import (
+    CONNECT_TIMEOUT_SECONDS,
+    READ_TIMEOUT_SECONDS,
+    REQUEST_TIMEOUT_SECONDS,
+    ImagePart,
+    ParseError,
+    Part,
+    Refused,
+    TextPart,
+    TransientError,
+    Usage,
+    VisionModel,
+)
 
 TRANSIENT_ERRORS = (
     anthropic.RateLimitError,
@@ -24,7 +36,9 @@ class AnthropicModel(VisionModel):
 
     def __init__(self, model: str) -> None:
         super().__init__(model)
-        self.client = anthropic.Anthropic()
+        self.client = anthropic.Anthropic(
+            timeout=anthropic.Timeout(REQUEST_TIMEOUT_SECONDS, connect=CONNECT_TIMEOUT_SECONDS, read=READ_TIMEOUT_SECONDS, write=60.0)
+        )
 
     def _complete(self, system, parts, schema, max_tokens):
         content = [_to_block(p) for p in parts]

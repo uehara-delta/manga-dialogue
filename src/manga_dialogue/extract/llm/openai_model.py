@@ -3,7 +3,7 @@ import base64
 import openai
 from pydantic import ValidationError
 
-from manga_dialogue.extract.llm.base import ImagePart, ParseError, Part, Refused, TextPart, TransientError, Usage, VisionModel
+from manga_dialogue.extract.llm.base import REQUEST_TIMEOUT_SECONDS, ImagePart, ParseError, Part, Refused, TextPart, TransientError, Usage, VisionModel
 
 TRANSIENT_ERRORS = (
     openai.RateLimitError,
@@ -21,7 +21,7 @@ class OpenAIModel(VisionModel):
 
     def __init__(self, model: str) -> None:
         super().__init__(model)
-        self.client = openai.OpenAI()
+        self.client = openai.OpenAI(timeout=REQUEST_TIMEOUT_SECONDS)
 
     def _complete(self, system, parts, schema, max_tokens):
         content = [_to_part(p) for p in parts]

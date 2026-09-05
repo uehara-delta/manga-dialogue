@@ -4,7 +4,7 @@ from google import genai
 from google.genai import errors, types
 from pydantic import ValidationError
 
-from manga_dialogue.extract.llm.base import ImagePart, ParseError, Part, TextPart, TransientError, Usage, VisionModel
+from manga_dialogue.extract.llm.base import REQUEST_TIMEOUT_SECONDS, ImagePart, ParseError, Part, TextPart, TransientError, Usage, VisionModel
 
 RETRYABLE_CLIENT_CODES = {429, 408}
 
@@ -17,7 +17,7 @@ class GeminiModel(VisionModel):
 
     def __init__(self, model: str) -> None:
         super().__init__(model)
-        self.client = genai.Client()
+        self.client = genai.Client(http_options=types.HttpOptions(timeout=int(REQUEST_TIMEOUT_SECONDS * 1000)))
 
     def _complete(self, system, parts, schema, max_tokens):
         contents = [_to_part(p) for p in parts]

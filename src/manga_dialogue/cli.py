@@ -16,6 +16,7 @@ from manga_dialogue.extract.characters import CharacterBook
 from manga_dialogue.extract.consolidate import propose_consolidation
 from manga_dialogue.extract.extractor import DEFAULT_MODEL, ExtractionFailed, extract_page
 from manga_dialogue.extract.llm import VisionModel, get_model
+from manga_dialogue.extract.llm.base import Cancelled
 from manga_dialogue.extract.llm import PROVIDER_DEFAULT_MODELS, PROVIDER_PREFIXES
 from manga_dialogue.extract.fix import FixPlan, apply_changes, load_pages, propose_fix
 from manga_dialogue.extract.pending import PendingRename, PendingStore
@@ -53,10 +54,6 @@ class Reporter:
 reporter = Reporter(False)
 
 
-class Cancelled(Exception):
-    """SIGTERM / SIGINT による中断要求"""
-
-
 _cancel_requested = False
 
 
@@ -68,6 +65,7 @@ def _request_cancel(signum, frame) -> None:
 def _install_cancel_handlers() -> None:
     signal.signal(signal.SIGTERM, _request_cancel)
     signal.signal(signal.SIGINT, _request_cancel)
+    VisionModel.cancel_requested = staticmethod(lambda: _cancel_requested)
 
 
 def _check_cancel() -> None:
@@ -271,8 +269,9 @@ def _usage_total(llm: VisionModel) -> dict:
 
 def _abort(error: Exception, **data) -> None:
     """課金切れ・認証エラーなど、続行しても回復しない失敗で処理全体を止める"""
+    first_line = (str(error).splitlines() or [""])[0][:300]
     reporter.error(
-        f"中断: {type(error).__name__}: {str(error).splitlines()[0][:300]}\n--resume を付けて再実行すると続きから処理できます",
+        f"中断: {type(error).__name__}: {first_line}\n--resume を付けて再実行すると続きから処理できます",
         error_type=type(error).__name__,
         **data,
     )
@@ -329,6 +328,8 @@ def extract(
                 except ExtractionFailed as e:
                     reporter.event("page_failed", f"失敗（スキップ）: {e}", volume=volume, page=int(image.stem), message=str(e))
                     failed.append(image.name)
+                except Cancelled:
+                    raise
                 except Exception as e:
                     _abort(e, done=processed, failed=failed, usage=_usage_total(llm))
     except RunLocked as e:
@@ -416,6 +417,8 @@ def repass(
                 except ExtractionFailed as e:
                     reporter.event("page_failed", f"失敗（スキップ）: {e}", volume=vol.volume, page=int(image.stem), message=str(e))
                     failed.append(f"v{vol.volume:02d}/{image.name}")
+                except Cancelled:
+                    raise
                 except Exception as e:
                     _abort(e, done=processed, failed=failed, usage=_usage_total(llm))
     except RunLocked as e:
