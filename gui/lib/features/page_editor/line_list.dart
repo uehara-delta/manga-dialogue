@@ -70,7 +70,7 @@ class LineList extends StatelessWidget {
                   ),
                   if (l.manual) const Icon(Icons.edit, size: 14, color: Colors.grey),
                   IconButton(
-                    tooltip: 'この行を削除 (⌘⌫)',
+                    tooltip: 'この行を削除 (⌘⌫ / Ctrl+Backspace)',
                     icon: const Icon(Icons.delete_outline, size: 16),
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
